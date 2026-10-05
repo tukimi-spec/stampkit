@@ -1,0 +1,22 @@
+{
+  "name": "スタンプ申請キット",
+  "short_name": "申請キット",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#eceee9",
+  "theme_color": "#16171b",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
