@@ -400,7 +400,34 @@ function order(bs) {
 function gridBoxes(c, rows, cols) { const out = [], cw = c.width / cols, ch = c.height / rows; for (let r = 0; r < rows; r++) for (let k = 0; k < cols; k++) out.push({ x: Math.round(k * cw), y: Math.round(r * ch), w: Math.round(cw), h: Math.round(ch) }); return out; }
 
 /* ---------- candidates & counts ---------- */
-function addCand(c, sheetId) { const cd = { id: uid++, raw: c, proc: null, transparent: isTransparent(c), url: thumbURL(c), sheetId }; S.cands.push(cd); return cd; }
+function addCand(c, sheetId) { const cd = { id: uid++, raw: c, proc: null, transparent: isTransparent(c), url: thumbURL(c), sheetId, ver: 0 }; S.cands.push(cd); return cd; }
+const vk = (cd) => cd.id + '.' + (cd.ver || 0); // cache key that changes whenever the cut-out is re-cropped
+const sameBox = (a, b) => a && b && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+// re-crop one cut-out from its (moved / resized) frame, keeping its id so selections stay
+function recrop(cd, sh, b) {
+  const wasProc = !!cd.proc;
+  cd.raw = crop(sh.src, b); cd.box = { ...b }; cd.ver = (cd.ver || 0) + 1;
+  cd.transparent = isTransparent(cd.raw);
+  cd.proc = wasProc && !cd.transparent ? removeBg(cd.raw, S.tol) : null;
+  cd.rawBlob = null; cd.procBlob = null;
+  cd.rawUrl = cd.proc ? thumbURL(cd.raw) : undefined; cd.url = thumbURL(cd.proc || cd.raw);
+  for (const k of Object.keys(S.dupOk)) if (k.startsWith('look|') && k.split('|').slice(1, 3).includes(String(cd.id))) delete S.dupOk[k];
+}
+// make the cut-outs of a sheet match its frames exactly (add / re-crop / remove)
+function syncSheet(sh) {
+  const mine = S.cands.filter(c => c.sheetId === sh.id), keep = new Set(); let changed = 0;
+  const list = sh.boxes.map(b => {
+    let cd = b.cid != null ? mine.find(c => c.id === b.cid) : null;
+    if (cd) { if (!sameBox(cd.box, b)) { recrop(cd, sh, b); changed++; } }
+    else { cd = addCand(crop(sh.src, b), sh.id); cd.box = { ...b }; b.cid = cd.id; changed++; }
+    keep.add(cd.id); return cd;
+  });
+  mine.filter(c => !keep.has(c.id)).forEach(c => { removeCand(c.id, true); changed++; });
+  // keep this sheet's cut-outs in frame order, at the sheet's place in the list
+  const at = S.cands.findIndex(c => c.sheetId === sh.id), rest = S.cands.filter(c => c.sheetId !== sh.id);
+  rest.splice(at < 0 ? rest.length : Math.min(at, rest.length), 0, ...list); S.cands = rest;
+  return changed;
+}
 const cand = (id) => S.cands.find(c => c.id === id);
 const imgOf = (cd) => cd.proc || cd.raw;
 const isClear = (cd) => cd.transparent || !!cd.proc;
@@ -417,7 +444,7 @@ function usedCands() { const ids = new Set(); slotsAll().forEach(sl => { const c
 const cache = new Map(), kbCache = new Map();
 function convert(cd, sl) {
   const m = sl.margin ?? S.margin[S.mode];
-  const key = [cd.id, cd.proc ? 'p' : 'r', sl.name, sl.w, sl.h, m, S.stickerFit, S.themeBg].join('|');
+  const key = [vk(cd), cd.proc ? 'p' : 'r', sl.name, sl.w, sl.h, m, S.stickerFit, S.themeBg].join('|');
   if (cache.has(key)) return cache.get(key);
   let src = imgOf(cd); if (isClear(cd)) src = trim(src);
   let W = sl.w, H = sl.h, out, scale;
@@ -543,12 +570,16 @@ function vCut(v) {
   const shs = p.querySelector('#sheets');
   S.sheets.forEach(s => { const b = el(`<button type="button" aria-pressed="${s.id === S.active}" title="${esc(s.name)}"><img alt="${esc(s.name)}" src="${s.thumb}">${s.cut ? '<span class="tag">切出済</span>' : ''}</button>`); b.onclick = () => { S.active = s.id; S.selBox = null; render(); }; shs.appendChild(b); });
   const cur = sheet(S.active); if (cur) editor(p.querySelector('#editor'), cur);
-  if (S.cands.length) {
-    const c = el(`<div style="margin-top:20px"><h3 style="font-size:15px;margin-bottom:8px">切り出した絵 <span class="mono">${S.cands.length}</span>枚</h3><div class="cands"></div></div>`);
-    S.cands.forEach(cd => { const d = el(`<div class="cand" style="cursor:default"><div class="im chk"><img alt="" src="${cd.url}"></div><div class="cap"><span>#${cd.id}</span>${isClear(cd) ? '<span class="pill ok">透過</span>' : '<span class="pill warn">背景あり</span>'}</div><button class="del" type="button" aria-label="この絵を削除">×</button></div>`);
-      d.querySelector('.del').onclick = () => removeCand(cd.id); c.querySelector('.cands').appendChild(d); });
-    p.querySelector('#cl').appendChild(c);
-  }
+  drawCutList(p.querySelector('#cl'));
+}
+function drawCutList(host) {
+  if (!host) return; host.innerHTML = '';
+  if (!S.cands.length) return;
+  const c = el(`<div style="margin-top:20px"><h3 style="font-size:15px;margin-bottom:8px">切り出した絵 <span class="mono">${S.cands.length}</span>枚</h3><div class="cands"></div></div>`);
+  S.cands.forEach(cd => { const d = el(`<div class="cand" style="cursor:default"><div class="im chk"><img alt="" src="${cd.url}"></div><div class="cap"><span>#${cd.id}</span>${isClear(cd) ? '<span class="pill ok">透過</span>' : '<span class="pill warn">背景あり</span>'}</div><button class="del" type="button" aria-label="この絵を削除">×</button></div>`);
+    d.querySelector('.del').onclick = () => { const sh = sheet(cd.sheetId); if (sh) { const i = sh.boxes.findIndex(b => b.cid === cd.id); if (i >= 0) sh.boxes.splice(i, 1); } removeCand(cd.id); };
+    c.querySelector('.cands').appendChild(d); });
+  host.appendChild(c);
 }
 function editor(host, sh) {
   const e = el(`<div><div class="toolbar">
@@ -570,11 +601,18 @@ function editor(host, sh) {
     sh.boxes.forEach((b, i) => {
       const d = el(`<div class="box ${S.selBox === i ? 'sel' : ''}" data-i="${i}"><span class="no">${i + 1}</span>${['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map(h => `<span class="h" data-h="${h}"></span>`).join('')}<button class="del" type="button" aria-label="枠${i + 1}を削除">×</button></div>`);
       place(d, b);
-      const del = d.querySelector('.del'); del.addEventListener('pointerdown', ev => ev.stopPropagation()); del.onclick = ev => { ev.stopPropagation(); sh.boxes.splice(i, 1); S.selBox = null; draw(); };
+      const del = d.querySelector('.del'); del.addEventListener('pointerdown', ev => ev.stopPropagation()); del.onclick = ev => { ev.stopPropagation(); sh.boxes.splice(i, 1); S.selBox = null; draw(); commit(); };
       stage.appendChild(d);
     });
-    e.querySelector('#info').textContent = `枠 ${sh.boxes.length}個（この数だけ切り出されます）`;
-    const cb = e.querySelector('#cut'); cb.textContent = sh.cut ? `この枠で切り出し直す（${sh.boxes.length}枚）` : `${sh.boxes.length}枚を切り出す`; cb.disabled = !sh.boxes.length;
+    e.querySelector('#info').textContent = sh.cut ? `枠 ${sh.boxes.length}個 ・ 切り出し済み（枠を動かすと、切り出した絵にもすぐ反映されます）` : `枠 ${sh.boxes.length}個（この数だけ切り出されます）`;
+    const cb = e.querySelector('#cut'); cb.hidden = sh.cut; cb.textContent = `${sh.boxes.length}枚を切り出す`; cb.disabled = !sh.boxes.length;
+  };
+  // once a sheet is cut, every frame change re-crops its cut-out right away
+  const commit = () => {
+    if (!sh.cut) return;
+    const n = syncSheet(sh); if (!n) return;
+    if (!sh.boxes.length) sh.cut = false;
+    drawCutList(document.querySelector('#cl')); renderTally(); renderBar(); scheduleSave(); draw();
   };
   let drag = null;
   const pt = (ev) => { const r = stage.getBoundingClientRect(); return { x: (ev.clientX - r.left) / r.width * W, y: (ev.clientY - r.top) / r.height * H, k: W / r.width }; };
@@ -606,18 +644,17 @@ function editor(host, sh) {
     if (!drag) return;
     if (drag.kind === 'new') { stage.querySelector('.draft')?.remove(); const r = drag.rect; if (r && r.w > drag.min && r.h > drag.min) { sh.boxes.push({ x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) }); S.selBox = sh.boxes.length - 1; } }
     else { const b = sh.boxes[drag.i]; for (const k in b) b[k] = Math.round(b[k]); }
-    drag = null; draw();
+    drag = null; draw(); commit();
   };
   stage.addEventListener('pointerup', end); stage.addEventListener('pointercancel', end);
-  e.querySelector('#auto').onclick = () => { sh.boxes = detect(sh.src, 20); S.selBox = null; draw(); toast(`${sh.boxes.length}個の枠を自動で作りました`); };
-  e.querySelector('#grid').onclick = () => { sh.rows = Math.max(1, +e.querySelector('#gr').value || 1); sh.cols = Math.max(1, +e.querySelector('#gc').value || 1); sh.boxes = gridBoxes(sh.src, sh.rows, sh.cols); S.selBox = null; draw(); };
-  e.querySelector('#add').onclick = () => { const s = Math.min(W, H) / 4; sh.boxes.push({ x: Math.round(W / 2 - s / 2), y: Math.round(H / 2 - s / 2), w: Math.round(s), h: Math.round(s) }); S.selBox = sh.boxes.length - 1; draw(); };
+  e.querySelector('#auto').onclick = () => { sh.boxes = detect(sh.src, 20); S.selBox = null; draw(); commit(); toast(`${sh.boxes.length}個の枠を自動で作りました`); };
+  e.querySelector('#grid').onclick = () => { sh.rows = Math.max(1, +e.querySelector('#gr').value || 1); sh.cols = Math.max(1, +e.querySelector('#gc').value || 1); sh.boxes = gridBoxes(sh.src, sh.rows, sh.cols); S.selBox = null; draw(); commit(); };
+  e.querySelector('#add').onclick = () => { const s = Math.min(W, H) / 4; sh.boxes.push({ x: Math.round(W / 2 - s / 2), y: Math.round(H / 2 - s / 2), w: Math.round(s), h: Math.round(s) }); S.selBox = sh.boxes.length - 1; draw(); commit(); };
   e.querySelector('#zoom').onclick = () => { S.zoom = S.zoom > 1 ? 1 : 2.2; render(); };
-  e.querySelector('#clr').onclick = () => { sh.boxes = []; S.selBox = null; draw(); };
+  e.querySelector('#clr').onclick = () => { sh.boxes = []; S.selBox = null; draw(); commit(); };
   e.querySelector('#rm').onclick = () => { S.cands.filter(c => c.sheetId === sh.id).forEach(c => removeCand(c.id, true)); S.sheets = S.sheets.filter(s => s.id !== sh.id); S.active = S.sheets[0]?.id ?? null; render(); };
   e.querySelector('#cut').onclick = () => {
-    S.cands.filter(c => c.sheetId === sh.id).forEach(c => removeCand(c.id, true));
-    sh.boxes = order(sh.boxes); sh.boxes.forEach(b => addCand(crop(sh.src, b), sh.id)); sh.cut = true;
+    sh.boxes = order(sh.boxes); syncSheet(sh); sh.cut = true;
     toast(`${sh.boxes.length}枚を切り出しました`); S.selBox = null; render();
   };
   draw();
@@ -725,7 +762,7 @@ function vClear(v) {
   const s = body.querySelector('#skip'); if (s) s.onclick = () => go(4);
 }
 function removeBgPreview(cd) {
-  const k = cd.id + '|' + S.tol; if (prevCache.has(k)) return prevCache.get(k);
+  const k = vk(cd) + '|' + S.tol; if (prevCache.has(k)) return prevCache.get(k);
   const s = 240, kk = Math.min(1, s / Math.max(cd.raw.width, cd.raw.height)); const t = mk(cd.raw.width * kk, cd.raw.height * kk); ctx2(t).drawImage(cd.raw, 0, 0, t.width, t.height);
   const url = removeBg(t, S.tol).toDataURL(); prevCache.set(k, url); return url;
 }
@@ -734,7 +771,7 @@ function removeBgPreview(cd) {
 // colour signature of the visible illustration (on white), cached per image version
 const sigCache = new Map();
 function sigOf(cd) {
-  const k = cd.id + (cd.proc ? 'p' : 'r'); if (sigCache.has(k)) return sigCache.get(k);
+  const k = vk(cd) + (cd.proc ? 'p' : 'r'); if (sigCache.has(k)) return sigCache.get(k);
   let src = imgOf(cd); if (isClear(cd)) src = trim(src);
   const N = 32, t = mk(N, N), x = ctx2(t); x.fillStyle = '#fff'; x.fillRect(0, 0, N, N); x.imageSmoothingQuality = 'high'; x.drawImage(src, 0, 0, N, N);
   const sig = { d: x.getImageData(0, 0, N, N).data, ar: src.width / src.height }; sigCache.set(k, sig); return sig;
@@ -899,7 +936,13 @@ function scheduleSave() { if (!saveReady) return; clearTimeout(saveT); saveT = s
 async function saveNow() {
   try {
     if (!S.cands.length) { await STORE.del('work'); return; }
-    for (const cd of S.cands) { if (!cd.rawBlob) cd.rawBlob = await toPng(cd.raw); if (cd.proc && !cd.procBlob) cd.procBlob = await toPng(cd.proc); if (!cd.proc) cd.procBlob = null; }
+    for (const cd of S.cands) {
+      // a frame may be moved while we encode: only keep a blob if the image is still the same one
+      if (!cd.rawBlob) { const r = cd.raw, bl = await toPng(r); if (cd.raw === r) cd.rawBlob = bl; }
+      if (cd.proc && !cd.procBlob) { const r = cd.proc, bl = await toPng(r); if (cd.proc === r) cd.procBlob = bl; }
+      if (!cd.proc) cd.procBlob = null;
+    }
+    if (S.cands.some(c => !c.rawBlob || (c.proc && !c.procBlob))) { scheduleSave(); return; }
     await STORE.set('work', { v: 1, at: Date.now(), uid, mode: S.mode, count: S.count, themeOpt: S.themeOpt, margin: S.margin, stickerFit: S.stickerFit, themeBg: S.themeBg, mirror: S.mirror,
       picked: S.picked, mainId: S.mainId, tabId: S.tabId, themeAssign: S.themeAssign, fileNames: S.fileNames, words: S.words, dupOk: S.dupOk, step: S.step,
       cands: S.cands.map(c => ({ id: c.id, raw: c.rawBlob, proc: c.procBlob, transparent: c.transparent, sheetId: c.sheetId })) });
@@ -972,4 +1015,3 @@ render();
 offerResume();
 (async () => { try { if (window.claude?.use) dl = await window.claude.use('downloads'); } catch { dl = null; } })();
 </script>
-</body></html>
