@@ -176,6 +176,17 @@ button,select,input{font:inherit;color:inherit}
 .titem .pair{display:grid;grid-template-columns:1fr 1fr;gap:4px}
 .titem .pair div{aspect-ratio:1;border-radius:6px;display:grid;place-items:center;overflow:hidden}
 .titem .pair img{max-width:100%;max-height:100%}
+.tgrid.bg-dark .tv{background:#17171c}.tgrid.bg-green .tv{background:#1d7a45}.tgrid.bg-pink .tv{background:#ff7eb0}
+.tgrid.bg-chk .tv{background:repeating-conic-gradient(#d9d9de 0 25%,#fff 0 50%) 0 0/16px 16px}
+.seg{display:inline-flex;flex-wrap:wrap;gap:4px}.seg button{border:1.5px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.sheetpop.tu{max-width:980px;max-height:94vh}
+@media (max-width:560px){#tu{padding:6px}.sheetpop.tu{padding:12px}.sheetpop.tu .seg button{padding:6px 10px}}
+.tuwrap{margin-top:8px;max-height:56vh;overflow:auto;display:flex;border-radius:12px;border:1px solid var(--line)}
+.tustage{position:relative;margin:0 auto;max-width:none;flex-shrink:0}.tustage canvas{display:block;width:100%;height:auto;touch-action:none;cursor:crosshair}
+.tustage.pan canvas{touch-action:auto;cursor:grab}
+.tustage.bg-dark{background:#17171c}.tustage.bg-green{background:#1d7a45}.tustage.bg-pink{background:#ff7eb0}.tustage.bg-chk{background:repeating-conic-gradient(#d9d9de 0 25%,#fff 0 50%) 0 0/20px 20px}
+.tucur{position:absolute;border:2px solid #fff;outline:1px solid #000;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}
 .titem .lbl{display:grid;grid-template-columns:1fr 1fr;font-size:10px;color:var(--muted);text-align:center}
 .ask{display:grid;gap:12px;padding:16px;border-radius:14px;background:color-mix(in srgb,var(--hi) 25%,var(--surface));border:1px solid var(--hi);margin-bottom:14px}
 .ask h3{font-size:18px}
@@ -319,8 +330,24 @@ const S = {
   sheets: [], active: null, selBox: null,
   cands: [], picked: [], mainId: null, tabId: null, themeAssign: {},
   tol: 40, reviewBg: 'chk', maxStep: 0, zoom: 1, fileNames: {}, words: {}, dupOk: {},
+  holes: false, erode: 0, done: false, byMode: {},
 };
+/* ---------- work is kept per kind (sticker / emoji / theme), and a finished set is not carried over ---------- */
+const WORK = { sheets: () => [], active: () => null, cands: () => [], picked: () => [], mainId: () => null, tabId: () => null, themeAssign: () => ({}), words: () => ({}), dupOk: () => ({}), fileNames: () => ({}), done: () => false };
+function clearWork() { for (const k in WORK) S[k] = WORK[k](); S.selBox = null; S.maxStep = Math.min(S.maxStep, 1); tInit = false; tSel.clear(); }
+function switchMode(m) {
+  if (m === S.mode) return;
+  S.byMode[S.mode] = Object.fromEntries(Object.keys(WORK).map(k => [k, S[k]]));
+  const w = S.byMode[m]; delete S.byMode[m];
+  clearWork(); if (w && !w.done) Object.assign(S, w);
+  S.mode = m; tInit = false;
+}
+// a set that was already written out to a ZIP is finished: starting again begins with an empty list
+function freshIfDone() { if (S.done) { clearWork(); toast('前回のセットは書き出し済みなので、新しいセットとして始めます'); } }
+// adding images after the ZIP was written: ask whether this is a new set or more for the same one
+function askFreshIfDone() { if (S.done && S.cands.length) { if (confirm('前回ZIPに書き出したセットの絵が残っています。\n\nOK：消して新しいセットとして始める\nキャンセル：今のセットに追加する')) clearWork(); else S.done = false; } }
 let uid = 1;
+const TAU2 = Math.PI * 2;
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -361,22 +388,85 @@ function borderColor(d, w, h) {
   for (let i = 0; i < cols.length; i += 3) { const c = cols[i]; let n = 0; for (const o of cols) if (Math.abs(c[0] - o[0]) + Math.abs(c[1] - o[1]) + Math.abs(c[2] - o[2]) < 30) n++; if (n > bn) { bn = n; best = c; } }
   return best;
 }
-// flood fill from the border → enclosed whites (eyes, text) stay
-function removeBg(src, tol) {
+// ---- background removal ----
+// 1) find up to 3 background colours on the border (paper, gradient, shadow)
+// 2) flood fill from the border, also following gentle gradients
+// 3) optional: enclosed gaps of background colour (between arm and body…)
+// 4) edge pixels are un-mixed from the background colour → no white halo
+// 5) optional erosion, then tiny leftover specks are removed
+function bgPalette(d, w, h) {
+  const pts = [], sx = Math.max(1, Math.floor(w / 90)), sy = Math.max(1, Math.floor(h / 90));
+  const add = (x, y) => { const i = (y * w + x) * 4; if (d[i + 3] >= 20) pts.push([d[i], d[i + 1], d[i + 2]]); };
+  for (let x = 0; x < w; x += sx) { add(x, 0); add(x, h - 1); if (h > 4) { add(x, 1); add(x, h - 2); } }
+  for (let y = 0; y < h; y += sy) { add(0, y); add(w - 1, y); if (w > 4) { add(1, y); add(w - 2, y); } }
+  if (!pts.length) return [[255, 255, 255]];
+  const near = (a, b) => Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2])) <= 26;
+  const pal = []; let rest = pts;
+  while (rest.length && pal.length < 3) {
+    let best = null, bn = -1; for (let i = 0; i < rest.length; i += Math.max(1, rest.length >> 7)) { let n = 0; for (const o of rest) if (near(rest[i], o)) n++; if (n > bn) { bn = n; best = rest[i]; } }
+    const mem = rest.filter(o => near(best, o)); if (pal.length && mem.length < pts.length * 0.12) break;
+    const m = [0, 1, 2].map(k => Math.round(mem.reduce((s, o) => s + o[k], 0) / mem.length)); pal.push(m);
+    rest = rest.filter(o => !near(best, o));
+  }
+  return pal;
+}
+function removeBg(src, tol, o = {}) {
+  const holes = o.holes ?? S.holes, erode = o.erode ?? S.erode, fast = !!o.fast;
   const w = src.width, h = src.height, c = mk(w, h), x = ctx2(c); x.drawImage(src, 0, 0);
-  const id = x.getImageData(0, 0, w, h), d = id.data, bg = borderColor(d, w, h);
-  const N = w * h, seen = new Uint8Array(N), st = new Int32Array(N); let sp = 0;
-  const dist = (p) => { const i = p * 4; if (d[i + 3] < 20) return 0; return Math.max(Math.abs(d[i] - bg[0]), Math.abs(d[i + 1] - bg[1]), Math.abs(d[i + 2] - bg[2])); };
-  const push = (p) => { if (!seen[p] && dist(p) <= tol) { seen[p] = 1; st[sp++] = p; } };
-  for (let i = 0; i < w; i++) { push(i); push((h - 1) * w + i); } for (let j = 0; j < h; j++) { push(j * w); push(j * w + w - 1); }
-  while (sp) { const p = st[--sp], px = p % w; if (px > 0) push(p - 1); if (px < w - 1) push(p + 1); if (p >= w) push(p - w); if (p < N - w) push(p + w); }
+  const id = x.getImageData(0, 0, w, h), d = id.data, N = w * h, pal = bgPalette(d, w, h);
+  // distance of every pixel to the nearest background colour (max channel difference)
+  const D = new Uint8Array(N), B = new Uint8Array(N);
+  for (let p = 0, i = 0; p < N; p++, i += 4) {
+    if (d[i + 3] < 20) { D[p] = 0; continue; }
+    let best = 255, bi = 0; for (let k = 0; k < pal.length; k++) { const q = pal[k]; const v = Math.max(Math.abs(d[i] - q[0]), Math.abs(d[i + 1] - q[1]), Math.abs(d[i + 2] - q[2])); if (v < best) { best = v; bi = k; } }
+    D[p] = best; B[p] = bi;
+  }
+  const seen = new Uint8Array(N), st = new Int32Array(N); let sp = 0;
+  const soft = Math.min(255, tol * 1.8), step = Math.max(6, tol / 4);
+  const loc = (p, q) => { const i = p * 4, j = q * 4; return Math.max(Math.abs(d[i] - d[j]), Math.abs(d[i + 1] - d[j + 1]), Math.abs(d[i + 2] - d[j + 2])); };
+  const seed = (p) => { if (!seen[p] && D[p] <= tol) { seen[p] = 1; st[sp++] = p; } };
+  const grow = (p, q) => { if (seen[q]) return; if (D[q] <= tol || (D[q] <= soft && loc(p, q) <= step)) { seen[q] = 1; st[sp++] = q; } };
+  for (let i = 0; i < w; i++) { seed(i); seed((h - 1) * w + i); } for (let j = 0; j < h; j++) { seed(j * w); seed(j * w + w - 1); }
+  while (sp) { const p = st[--sp], px = p % w; if (px > 0) grow(p, p - 1); if (px < w - 1) grow(p, p + 1); if (p >= w) grow(p, p - w); if (p < N - w) grow(p, p + w); }
+  if (holes) { // enclosed areas whose colour is (on average) the background colour, big enough not to be an eye highlight
+    const meanMax = Math.max(10, tol * 0.35), minA = Math.max(24, N * 0.0012), lab = new Uint8Array(N);
+    for (let p0 = 0; p0 < N; p0++) { if (seen[p0] || lab[p0] || D[p0] > tol) continue;
+      const comp = []; let sum = 0; lab[p0] = 1; st[0] = p0; sp = 1;
+      while (sp) { const p = st[--sp]; comp.push(p); sum += D[p]; const px = p % w;
+        for (const q of [px > 0 ? p - 1 : -1, px < w - 1 ? p + 1 : -1, p >= w ? p - w : -1, p < N - w ? p + w : -1]) if (q >= 0 && !seen[q] && !lab[q] && D[q] <= tol) { lab[q] = 1; st[sp++] = q; } }
+      if (comp.length >= minA && sum / comp.length <= meanMax) for (const p of comp) seen[p] = 1; }
+  }
   for (let p = 0; p < N; p++) if (seen[p]) d[p * 4 + 3] = 0;
-  for (let p = 0; p < N; p++) { if (seen[p]) continue; const px = p % w;
-    if ((px > 0 && seen[p - 1]) || (px < w - 1 && seen[p + 1]) || (p >= w && seen[p - w]) || (p < N - w && seen[p + w])) { const k = Math.min(1, Math.max(0, (dist(p) - tol) / (tol * 1.5 + 10))); d[p * 4 + 3] = Math.round(d[p * 4 + 3] * (.35 + .65 * k)); } }
+  if (fast) { x.putImageData(id, 0, 0); return c; }
+  // edge band (2px) → estimate how much background is mixed in, and take it out again
+  const band = new Uint8Array(N);
+  for (let r = 1; r <= 2; r++) for (let p = 0; p < N; p++) { if (seen[p] || band[p]) continue; const px = p % w;
+    const nb = (q) => seen[q] || band[q] === r - 1 && band[q] > 0;
+    if ((px > 0 && nb(p - 1)) || (px < w - 1 && nb(p + 1)) || (p >= w && nb(p - w)) || (p < N - w && nb(p + w))) band[p] = r; }
+  for (let p = 0; p < N; p++) { if (!band[p]) continue; const px = p % w, py = (p / w) | 0; let Di = 0;
+    for (let yy = Math.max(0, py - 3); yy <= Math.min(h - 1, py + 3); yy++) for (let xx = Math.max(0, px - 3); xx <= Math.min(w - 1, px + 3); xx++) { const q = yy * w + xx; if (!seen[q] && !band[q] && D[q] > Di) Di = D[q]; }
+    if (!Di) for (let yy = Math.max(0, py - 2); yy <= Math.min(h - 1, py + 2); yy++) for (let xx = Math.max(0, px - 2); xx <= Math.min(w - 1, px + 2); xx++) { const q = yy * w + xx; if (!seen[q] && D[q] > Di) Di = D[q]; }
+    const i = p * 4; let a = Di ? Math.min(1, D[p] / Di) : 1;
+    if (D[p] <= tol * 0.55) a = Math.min(a, 0.15);
+    if (a < 0.1) { d[i + 3] = 0; continue; }
+    if (a < 0.98) { const q = pal[B[p]]; for (let k = 0; k < 3; k++) d[i + k] = Math.max(0, Math.min(255, Math.round((d[i + k] - (1 - a) * q[k]) / a))); }
+    d[i + 3] = Math.round(d[i + 3] * a);
+  }
+  for (let e = 0; e < erode; e++) { const kill = []; for (let p = 0; p < N; p++) { if (!d[p * 4 + 3]) continue; const px = p % w;
+      if ((px > 0 && !d[(p - 1) * 4 + 3]) || (px < w - 1 && !d[(p + 1) * 4 + 3]) || (p >= w && !d[(p - w) * 4 + 3]) || (p < N - w && !d[(p + w) * 4 + 3])) kill.push(p); }
+    for (const p of kill) d[p * 4 + 3] = 0; }
+  // tiny specks left from JPEG noise (a few pixels, not touching anything)
+  const vis = new Uint8Array(N), maxSpeck = Math.max(3, Math.round(N * 0.00003));
+  for (let p0 = 0; p0 < N; p0++) { if (vis[p0] || !d[p0 * 4 + 3]) continue; const comp = [p0]; vis[p0] = 1; let k = 0, big = false;
+    while (k < comp.length) { const p = comp[k++], px = p % w;
+      for (const q of [px > 0 ? p - 1 : -1, px < w - 1 ? p + 1 : -1, p >= w ? p - w : -1, p < N - w ? p + w : -1, px > 0 && p >= w ? p - w - 1 : -1, px < w - 1 && p >= w ? p - w + 1 : -1, px > 0 && p < N - w ? p + w - 1 : -1, px < w - 1 && p < N - w ? p + w + 1 : -1])
+        if (q >= 0 && !vis[q] && d[q * 4 + 3]) { vis[q] = 1; comp.push(q); }
+      if (comp.length > maxSpeck) { big = true; } }
+    if (!big) for (const p of comp) d[p * 4 + 3] = 0; }
   x.putImageData(id, 0, 0); return c;
 }
 function detect(c, gapPx) {
-  const mc = isTransparent(c) ? c : removeBg(c, 40); const m = alphaMask(mc), w = c.width, h = c.height;
+  const mc = isTransparent(c) ? c : removeBg(c, 40, { fast: true, holes: false }); const m = alphaMask(mc), w = c.width, h = c.height;
   const cell = Math.max(2, Math.ceil(Math.max(w, h) / 420)), gw = Math.ceil(w / cell), gh = Math.ceil(h / cell), g = new Uint8Array(gw * gh);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (m[y * w + x]) g[((y / cell) | 0) * gw + ((x / cell) | 0)] = 1;
   const r = Math.round(gapPx / cell); let gd = g;
@@ -409,7 +499,7 @@ function recrop(cd, sh, b) {
   cd.raw = crop(sh.src, b); cd.box = { ...b }; cd.ver = (cd.ver || 0) + 1;
   cd.transparent = isTransparent(cd.raw);
   cd.proc = wasProc && !cd.transparent ? removeBg(cd.raw, S.tol) : null;
-  cd.rawBlob = null; cd.procBlob = null;
+  cd.rawBlob = null; cd.procBlob = null; cd.manual = false;
   cd.rawUrl = cd.proc ? thumbURL(cd.raw) : undefined; cd.url = thumbURL(cd.proc || cd.raw);
   for (const k of Object.keys(S.dupOk)) if (k.startsWith('look|') && k.split('|').slice(1, 3).includes(String(cd.id))) delete S.dupOk[k];
 }
@@ -518,7 +608,14 @@ function vChoose(v) {
     <div class="kinds">${['sticker', 'emoji', 'theme'].map(k => `<button type="button" class="kind-card" data-k="${k}" aria-pressed="${S.mode === k}"><h3>${SPEC[k].label}</h3><p>${SPEC[k].blurb}</p><span class="spec">${SPEC[k].spec}</span></button>`).join('')}</div>
     <div class="counts" id="counts"></div></section>`);
   v.appendChild(p);
-  p.querySelectorAll('[data-k]').forEach(b => b.onclick = () => { S.mode = b.dataset.k; render(); });
+  p.querySelectorAll('[data-k]').forEach(b => b.onclick = () => { switchMode(b.dataset.k); render(); });
+  if (S.cands.length && !S.done) {
+    const box = el(`<div class="resume" role="region" aria-label="作業中のデータ" style="margin-top:16px"><b>${SPEC[S.mode].label}の作業中のデータがあります</b><span class="hint">切り出した絵 ${S.cands.length}枚。続きを作るならそのまま、別のセットを作るなら「消して新しく始める」を押してください。</span>
+      <div class="row"><button class="btn primary" type="button" id="wc">この続きを作る</button><button class="btn ghost" type="button" id="wn">消して新しく始める</button></div></div>`);
+    box.querySelector('#wc').onclick = () => go(Math.max(2, Math.min(S.maxStep, 5)));
+    box.querySelector('#wn').onclick = () => { clearWork(); toast('作業中のデータを消しました'); render(); };
+    p.appendChild(box);
+  }
   const cs = p.querySelector('#counts');
   if (S.mode === 'theme') {
     cs.innerHTML = `<h3>着せかえの画像セット（全60枚）</h3><p class="hint">着せかえは枚数が決まっています。サムネイル3・メニューボタン34・パスコード16・プロフィール4の必須57枚に、任意のメニュー背景1・トーク背景2を加えた全60枚です。</p>
@@ -541,7 +638,7 @@ async function addFiles(files) {
   // some phones hand over photos with an empty type, so accept by extension too
   const list = [...files].filter(f => !/^(video|audio|text)\//.test(f.type || '') && !/pdf|zip/.test(f.type || '')); // decode anything image-like; phones sometimes send no type
   if (!list.length) { toast('画像ファイル（PNG・JPG・WebP）を選んでください'); return; }
-  startFresh();
+  startFresh(); askFreshIfDone();
   const ld = el('<div class="loading" role="status"><div>画像を読み込んでいます…</div></div>'); document.body.appendChild(ld);
   let ok = 0;
   for (const f of list) {
@@ -566,7 +663,7 @@ function vCut(v) {
   ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
   drop.addEventListener('drop', e => addFiles(e.dataTransfer.files));
-  p.querySelector('#sample').onclick = () => { startFresh(); addSheet(makeSample(), 'サンプル'); render(); };
+  p.querySelector('#sample').onclick = () => { startFresh(); askFreshIfDone(); addSheet(makeSample(), 'サンプル'); render(); };
   const shs = p.querySelector('#sheets');
   S.sheets.forEach(s => { const b = el(`<button type="button" aria-pressed="${s.id === S.active}" title="${esc(s.name)}"><img alt="${esc(s.name)}" src="${s.thumb}">${s.cut ? '<span class="tag">切出済</span>' : ''}</button>`); b.onclick = () => { S.active = s.id; S.selBox = null; render(); }; shs.appendChild(b); });
   const cur = sheet(S.active); if (cur) editor(p.querySelector('#editor'), cur);
@@ -733,38 +830,134 @@ function openPicker(title, list, onPick, onClear) {
 
 /* ---------- STEP 4: transparency ---------- */
 const tSel = new Set(); let tInit = false, tq; const prevCache = new Map();
+const tOpts = () => `${S.tol}|${S.holes ? 1 : 0}|${S.erode}`;
+// every change of the transparent image goes through here so all caches see a new version
+function setProc(cd, canvas, manual) {
+  if (canvas && !cd.rawUrl) cd.rawUrl = cd.url && !cd.proc ? cd.url : thumbURL(cd.raw);
+  cd.proc = canvas; cd.procBlob = null; cd.manual = !!(canvas && manual); cd.ver = (cd.ver || 0) + 1;
+  cd.url = canvas ? thumbURL(canvas) : (cd.rawUrl || thumbURL(cd.raw));
+  for (const k of Object.keys(S.dupOk)) if (k.startsWith('look|') && k.split('|').slice(1, 3).includes(String(cd.id))) delete S.dupOk[k];
+}
 function vClear(v) {
-  const used = usedCands(), todo = used.filter(c => !c.transparent);
+  const used = usedCands(), todo = used.filter(c => !c.transparent), pre = used.filter(c => c.transparent);
   const opaqueOnly = (cd) => S.mode === 'theme' && slotsAll().filter(s => S.themeAssign[s.name] === cd.id).every(s => s.opaque || s.fit === 'cover');
   if (!tInit) { tSel.clear(); todo.forEach(c => { if (!c.proc && !opaqueOnly(c)) tSel.add(c.id); }); tInit = true; }
-  const notYet = todo.filter(c => !c.proc);
-  const p = el(`<section class="panel"><div class="ph"><div><span class="eyebrow">Step 4</span><h2>背景の透過チェック</h2><p class="lead">選んだ絵 ${used.length}枚を確認しました。元から透過済みの絵はそのまま使い、背景が残っている絵だけを透過処理します。</p></div></div><div id="body"></div></section>`);
+  const notYet = todo.filter(c => !c.proc), autoDone = todo.filter(c => c.proc && !c.manual);
+  const p = el(`<section class="panel"><div class="ph"><div><span class="eyebrow">Step 4</span><h2>背景の透過チェック</h2><p class="lead">選んだ絵 ${used.length}枚を確認しました。元から透過済みの絵はそのまま使い、背景が残っている絵だけを透過処理します。消し残しがあるときは「手で直す」で、なぞって消せます。</p></div></div><div id="body"></div></section>`);
   v.appendChild(p); const body = p.querySelector('#body');
   if (!used.length) { body.innerHTML = '<div class="empty">まだ絵が選ばれていません。Step 3 で選んでください。</div>'; return; }
-  if (!todo.length) { body.innerHTML = `<div class="okbox">✓ 選んだ ${used.length}枚はすべて背景が透過されています。このまま次へ進めます。</div>`; return; }
-  body.innerHTML = (notYet.length ? `<div class="ask"><h3>透過されていない画像が ${notYet.length}枚あります。これらを透過させますか？</h3>
-      <div class="row" style="align-items:flex-end"><label class="field" style="min-width:220px;flex:1">背景として消す色の幅 <output id="to">${S.tol}</output><input type="range" id="tol" min="4" max="120" value="${S.tol}"></label>
-      <button class="btn primary" id="doit" type="button">チェックした絵を透過する</button><button class="btn ghost" id="skip" type="button">透過せずに進む</button></div>
-      <p class="hint">背景とつながった部分だけを消すので、目や文字の白は残ります。消えすぎるときは幅を小さく、背景が残るときは大きくしてください。</p></div>`
-      : `<div class="okbox">✓ 背景が残っていた ${todo.length}枚を透過しました。右の「透過後」を確認して、問題がなければ次へ進んでください。</div>`) +
-    `<p class="hint" style="margin-block:12px 10px">元から透過済み ${used.length - todo.length}枚・処理対象 ${todo.length}枚。左が元画像、右が透過後です。</p><div class="tgrid" id="tg"></div>`;
+  const opts = `<div class="row" style="align-items:flex-end"><label class="field" style="min-width:220px;flex:1">背景として消す色の幅 <output id="to">${S.tol}</output><input type="range" id="tol" min="4" max="120" value="${S.tol}"></label></div>
+      <div class="row" style="gap:16px"><label class="check"><input type="checkbox" id="holes" ${S.holes ? 'checked' : ''}> 腕と体のすき間など、<b>囲まれた背景</b>も消す</label>
+      <label class="check">ふちを細く削る <select id="erode" aria-label="ふちを削る幅"><option value="0" ${S.erode == 0 ? 'selected' : ''}>なし</option><option value="1" ${S.erode == 1 ? 'selected' : ''}>1px</option><option value="2" ${S.erode == 2 ? 'selected' : ''}>2px</option></select></label></div>
+      <p class="hint">背景とつながった部分を消し、ふちに混ざった背景色も取り除きます（白いフチが残りにくくなります）。消えすぎるときは幅を小さく、背景が残るときは大きく。すき間が残るときは「囲まれた背景も消す」、ふちに色が残るときは「ふちを削る」を試してください。</p>`;
+  body.innerHTML = (todo.length ? (notYet.length ? `<div class="ask"><h3>透過されていない画像が ${notYet.length}枚あります。これらを透過させますか？</h3>${opts}
+      <div class="row"><button class="btn primary" id="doit" type="button">チェックした絵を透過する</button><button class="btn ghost" id="skip" type="button">透過せずに進む</button></div></div>`
+      : `<div class="okbox">✓ 背景が残っていた ${todo.length}枚を透過しました。右の「透過後」を、背景色を切り替えて確認してください。</div>
+      <details class="ask" style="margin-top:12px" ${autoDone.length ? '' : 'hidden'}><summary style="cursor:pointer;font-weight:700">消し残しが多いときは：設定を変えて透過し直す</summary>${opts}<div class="row"><button class="btn" id="redo" type="button">この設定で ${autoDone.length}枚を透過し直す</button></div><p class="hint">「手で直す」で修正した絵は、上書きしないようにそのまま残します。</p></details>`)
+      : `<div class="okbox">✓ 選んだ ${used.length}枚はすべて元から背景が透過されています。消し残しがあれば「手で直す」で消せます。</div>`) +
+    `<div class="row" style="margin-block:14px 10px;justify-content:space-between"><p class="hint" style="margin:0">元から透過済み ${pre.length}枚・処理対象 ${todo.length}枚。左が元画像、右が透過後です。</p>
+      <div class="seg" role="group" aria-label="確認用の背景色">${[['chk', 'チェック'], ['dark', '黒'], ['green', '緑'], ['pink', 'ピンク']].map(([k, l]) => `<button type="button" data-bg="${k}" aria-pressed="${(S.tBg || 'dark') === k}">${l}</button>`).join('')}</div></div>
+    <div class="tgrid bg-${S.tBg || 'dark'}" id="tg"></div>`;
   const tg = body.querySelector('#tg');
-  todo.forEach(cd => {
-    const prev = cd.proc ? cd.url : removeBgPreview(cd), raw = cd.rawUrl || cd.url;
-    const it = el(`<div class="titem ${tSel.has(cd.id) || cd.proc ? 'on' : ''}"><div class="pair"><div class="chk"><img alt="元画像" src="${raw}"></div><div class="chk"><img alt="透過後" src="${prev}"></div></div><div class="lbl"><span>元</span><span>${cd.proc ? '透過済み' : '透過後'}</span></div>
-      ${cd.proc ? '<button class="btn sm ghost" type="button" data-undo>元に戻す</button>' : `<label class="check"><input type="checkbox" ${tSel.has(cd.id) ? 'checked' : ''}> 透過する ${opaqueOnly(cd) ? '<span class="pill warn">サムネイル用</span>' : ''}</label>`}</div>`);
+  body.querySelectorAll('[data-bg]').forEach(b => b.onclick = () => { S.tBg = b.dataset.bg; render(); });
+  [...todo, ...pre].forEach(cd => {
+    const isPre = cd.transparent, prev = cd.proc ? cd.url : isPre ? cd.url : removeBgPreview(cd), raw = cd.rawUrl || cd.url;
+    const state = isPre ? (cd.proc ? '手で修正済み' : '元から透過') : cd.proc ? (cd.manual ? '手で修正済み' : '透過済み') : '透過後（予想）';
+    const it = el(`<div class="titem ${tSel.has(cd.id) || cd.proc ? 'on' : ''}"><div class="pair"><div class="chk"><img alt="元画像" src="${raw}"></div><div class="tv"><img alt="透過後" src="${prev}"></div></div><div class="lbl"><span>元</span><span>${state}</span></div>
+      <div class="row" style="gap:6px">${isPre ? '' : cd.proc ? '<button class="btn sm ghost" type="button" data-undo>元に戻す</button>' : `<label class="check"><input type="checkbox" ${tSel.has(cd.id) ? 'checked' : ''}> 透過する ${opaqueOnly(cd) ? '<span class="pill warn">サムネイル用</span>' : ''}</label>`}
+      <button class="btn sm" type="button" data-fix>手で直す</button></div></div>`);
     const cb = it.querySelector('input'); if (cb) cb.onchange = e => { e.target.checked ? tSel.add(cd.id) : tSel.delete(cd.id); it.classList.toggle('on', e.target.checked); };
-    const u = it.querySelector('[data-undo]'); if (u) u.onclick = () => { cd.proc = null; cd.procBlob = null; cd.url = cd.rawUrl; tSel.add(cd.id); render(); };
+    const u = it.querySelector('[data-undo]'); if (u) u.onclick = () => { setProc(cd, null); tSel.add(cd.id); render(); };
+    it.querySelector('[data-fix]').onclick = () => openTouchUp(cd);
     tg.appendChild(it);
   });
-  const t = body.querySelector('#tol'); if (t) t.oninput = e => { S.tol = +e.target.value; body.querySelector('#to').textContent = S.tol; clearTimeout(tq); tq = setTimeout(render, 250); };
-  const d = body.querySelector('#doit'); if (d) d.onclick = () => { let n = 0; todo.forEach(cd => { if (tSel.has(cd.id) && !cd.proc) { cd.rawUrl = cd.rawUrl || cd.url; cd.proc = removeBg(cd.raw, S.tol); cd.procBlob = null; cd.url = thumbURL(cd.proc); n++; } }); toast(n ? `${n}枚を透過しました` : '透過する絵がチェックされていません'); render(); };
+  const later = () => { clearTimeout(tq); tq = setTimeout(render, 250); };
+  body.querySelectorAll('#tol').forEach(t => t.oninput = e => { S.tol = +e.target.value; body.querySelectorAll('#to').forEach(o => o.textContent = S.tol); later(); });
+  body.querySelectorAll('#holes').forEach(t => t.onchange = e => { S.holes = e.target.checked; render(); });
+  body.querySelectorAll('#erode').forEach(t => t.onchange = e => { S.erode = +e.target.value; render(); });
+  const d = body.querySelector('#doit'); if (d) d.onclick = () => runClear(todo.filter(cd => tSel.has(cd.id) && !cd.proc), '透過しました', '透過する絵がチェックされていません');
+  const rd = body.querySelector('#redo'); if (rd) rd.onclick = () => runClear(autoDone, '透過し直しました', '');
   const s = body.querySelector('#skip'); if (s) s.onclick = () => go(4);
 }
+// heavy work: show a spinner and yield between images so phones stay responsive
+async function runClear(list, done, none) {
+  if (!list.length) { if (none) toast(none); return; }
+  const ld = el(`<div class="loading" role="status"><div>透過しています… <span id="lp">0</span>/${list.length}</div></div>`); document.body.appendChild(ld);
+  for (let i = 0; i < list.length; i++) { await new Promise(r => setTimeout(r, 16)); setProc(list[i], removeBg(list[i].raw, S.tol)); const lp = ld.querySelector('#lp'); if (lp) lp.textContent = i + 1; }
+  ld.remove(); toast(`${list.length}枚を${done}`); render();
+}
 function removeBgPreview(cd) {
-  const k = vk(cd) + '|' + S.tol; if (prevCache.has(k)) return prevCache.get(k);
+  const k = vk(cd) + '|' + tOpts(); if (prevCache.has(k)) return prevCache.get(k);
   const s = 240, kk = Math.min(1, s / Math.max(cd.raw.width, cd.raw.height)); const t = mk(cd.raw.width * kk, cd.raw.height * kk); ctx2(t).drawImage(cd.raw, 0, 0, t.width, t.height);
   const url = removeBg(t, S.tol).toDataURL(); prevCache.set(k, url); return url;
+}
+
+/* ---------- hand touch-up: brush erase / brush restore / tap to erase a colour area ---------- */
+function openTouchUp(cd) {
+  const raw = cd.raw, W = raw.width, H = raw.height;
+  const work = mk(W, H), wx = ctx2(work);
+  wx.drawImage(cd.proc || (cd.transparent ? raw : removeBg(raw, S.tol)), 0, 0);
+  const undo = []; const snap = () => { undo.push(wx.getImageData(0, 0, W, H)); if (undo.length > 20) undo.shift(); };
+  let tool = 'erase', size = Math.max(6, Math.round(Math.max(W, H) / 30)), zoom = 1, bg = S.tBg || 'dark';
+  const pop = el(`<div class="overlay" id="tu"><div class="sheetpop tu" role="dialog" aria-modal="true" aria-label="手で直す">
+    <div class="ph"><h2 style="font-size:17px">手で直す</h2><div class="row"><button class="btn sm ghost" id="tx" type="button">やめる</button><button class="btn sm primary" id="tok" type="button">これで決定</button></div></div>
+    <div class="seg" role="group" aria-label="道具" id="tools">${[['erase', 'なぞって消す'], ['restore', 'なぞって戻す'], ['wand', 'タップで同じ色を消す'], ['pan', '動かす']].map(([k, l]) => `<button type="button" data-t="${k}">${l}</button>`).join('')}</div>
+    <div class="tuwrap" id="tw"><div class="tustage" id="tst"><canvas id="tc"></canvas><div class="tucur" id="tcur" hidden></div></div></div>
+    <div class="row" style="gap:8px 12px;margin-top:8px"><label class="field" style="flex:1;min-width:150px" id="szw">ブラシの太さ <output id="szo">${size}</output><input type="range" id="sz" min="2" max="${Math.max(40, Math.round(Math.max(W, H) / 6))}" value="${size}"></label>
+      <button class="btn sm" id="tz" type="button">拡大</button><button class="btn sm" id="tun" type="button">1つ戻す</button><button class="btn sm ghost" id="tre" type="button">自動透過からやり直す</button></div>
+    <div class="row" style="gap:8px;margin-top:6px"><span class="hint">背景色</span><div class="seg" role="group" aria-label="背景色">${[['chk', 'チェック'], ['dark', '黒'], ['green', '緑'], ['pink', 'ピンク']].map(([k, l]) => `<button type="button" data-b="${k}">${l}</button>`).join('')}</div></div>
+    <p class="hint" id="thint"></p></div></div>`);
+  document.body.appendChild(pop);
+  const cv = pop.querySelector('#tc'); cv.width = W; cv.height = H; const cx = ctx2(cv);
+  const stage = pop.querySelector('#tst'), wrap = pop.querySelector('#tw'), cur = pop.querySelector('#tcur');
+  const paint = () => { cx.clearRect(0, 0, W, H); cx.drawImage(work, 0, 0); };
+  const hints = { erase: '消したい所を指やマウスでなぞってください。', restore: '消えすぎた所をなぞると、元の絵に戻ります。', wand: '残った背景をタップすると、つながった同じ色の範囲がまとめて消えます（幅は透過の設定と同じ）。', pan: '拡大中に画像を動かします。' };
+  const sync = () => {
+    pop.querySelectorAll('[data-t]').forEach(b => b.setAttribute('aria-pressed', b.dataset.t === tool));
+    pop.querySelectorAll('[data-b]').forEach(b => b.setAttribute('aria-pressed', b.dataset.b === bg));
+    stage.className = 'tustage bg-' + bg + (tool === 'pan' ? ' pan' : '');
+    // fit the whole picture on screen at 1×, then enlarge from there
+    const fitW = Math.max(120, Math.min(wrap.clientWidth - 2, W * (window.innerHeight * 0.5) / H));
+    stage.style.width = Math.round(fitW * zoom) + 'px'; pop.querySelector('#tz').textContent = zoom > 1 ? '等倍' : '拡大';
+    pop.querySelector('#szw').style.display = tool === 'erase' || tool === 'restore' ? '' : 'none';
+    pop.querySelector('#thint').textContent = hints[tool]; pop.querySelector('#tun').disabled = !undo.length;
+  };
+  const pt = (ev) => { const r = cv.getBoundingClientRect(); return { x: (ev.clientX - r.left) / r.width * W, y: (ev.clientY - r.top) / r.height * H, k: r.width / W }; };
+  const dab = (x, y) => {
+    if (tool === 'erase') { wx.save(); wx.globalCompositeOperation = 'destination-out'; wx.beginPath(); wx.arc(x, y, size / 2, 0, TAU2); wx.fill(); wx.restore(); }
+    else { wx.save(); wx.beginPath(); wx.arc(x, y, size / 2, 0, TAU2); wx.clip(); wx.clearRect(x - size, y - size, size * 2, size * 2); wx.drawImage(raw, 0, 0); wx.restore(); }
+  };
+  const wand = (x0, y0) => {
+    const id = wx.getImageData(0, 0, W, H), d = id.data, sx = Math.floor(x0), sy = Math.floor(y0); if (sx < 0 || sy < 0 || sx >= W || sy >= H) return;
+    const s0 = (sy * W + sx) * 4; if (d[s0 + 3] < 20) { toast('そこはもう透明です'); return; }
+    const c0 = [d[s0], d[s0 + 1], d[s0 + 2]], tl = Math.max(12, S.tol), N = W * H, seen = new Uint8Array(N), st = [sy * W + sx]; seen[sy * W + sx] = 1; let n = 0;
+    const ok = (q) => { const i = q * 4; return d[i + 3] >= 20 && Math.max(Math.abs(d[i] - c0[0]), Math.abs(d[i + 1] - c0[1]), Math.abs(d[i + 2] - c0[2])) <= tl; };
+    while (st.length) { const p = st.pop(); d[p * 4 + 3] = 0; n++; const px = p % W;
+      for (const q of [px > 0 ? p - 1 : -1, px < W - 1 ? p + 1 : -1, p >= W ? p - W : -1, p < N - W ? p + W : -1]) if (q >= 0 && !seen[q] && ok(q)) { seen[q] = 1; st.push(q); } }
+    // soften the new edge a little: pixels next to the cleared area that are close to the colour fade out
+    for (let p = 0; p < N; p++) { if (seen[p] || d[p * 4 + 3] < 20) continue; const px = p % W;
+      if ((px > 0 && seen[p - 1]) || (px < W - 1 && seen[p + 1]) || (p >= W && seen[p - W]) || (p < N - W && seen[p + W])) { const i = p * 4, v = Math.max(Math.abs(d[i] - c0[0]), Math.abs(d[i + 1] - c0[1]), Math.abs(d[i + 2] - c0[2])); if (v <= tl * 2) d[i + 3] = Math.round(d[i + 3] * Math.min(1, (v - tl) / tl)); } }
+    wx.putImageData(id, 0, 0); toast(`${n}ピクセルを消しました`);
+  };
+  let down = null;
+  const showCur = (ev) => { if (tool !== 'erase' && tool !== 'restore') { cur.hidden = true; return; } const r = stage.getBoundingClientRect(), c = cv.getBoundingClientRect(), k = c.width / W; cur.hidden = false; Object.assign(cur.style, { width: size * k + 'px', height: size * k + 'px', left: ev.clientX - r.left + 'px', top: ev.clientY - r.top + 'px' }); };
+  cv.addEventListener('pointerdown', ev => { if (tool === 'pan') return; ev.preventDefault(); cv.setPointerCapture(ev.pointerId); const q = pt(ev); snap();
+    if (tool === 'wand') { wand(q.x, q.y); paint(); sync(); return; }
+    down = q; dab(q.x, q.y); paint(); showCur(ev); });
+  cv.addEventListener('pointermove', ev => { showCur(ev); if (!down) return; const q = pt(ev), dx = q.x - down.x, dy = q.y - down.y, dist = Math.hypot(dx, dy), stp = Math.max(1, size / 4);
+    for (let t = stp; t <= dist; t += stp) dab(down.x + dx * t / dist, down.y + dy * t / dist); dab(q.x, q.y); down = q; paint(); });
+  const up = () => { if (down) { down = null; sync(); } };
+  cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up); cv.addEventListener('pointerleave', () => { cur.hidden = true; });
+  pop.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { tool = b.dataset.t; sync(); });
+  pop.querySelectorAll('[data-b]').forEach(b => b.onclick = () => { bg = b.dataset.b; sync(); });
+  pop.querySelector('#sz').oninput = e => { size = +e.target.value; pop.querySelector('#szo').textContent = size; };
+  pop.querySelector('#tz').onclick = () => { zoom = zoom > 1 ? 1 : 2.5; if (zoom === 1 && tool === 'pan') tool = 'erase'; sync(); };
+  pop.querySelector('#tun').onclick = () => { const s = undo.pop(); if (s) { wx.putImageData(s, 0, 0); paint(); } sync(); };
+  pop.querySelector('#tre').onclick = () => { snap(); wx.clearRect(0, 0, W, H); wx.drawImage(cd.transparent ? raw : removeBg(raw, S.tol), 0, 0); paint(); sync(); };
+  const close = () => pop.remove();
+  pop.querySelector('#tx').onclick = close;
+  pop.querySelector('#tok').onclick = () => { const out = mk(W, H); ctx2(out).drawImage(work, 0, 0); setProc(cd, out, true); tSel.delete(cd.id); close(); toast('修正した絵を使います'); render(); };
+  paint(); sync();
 }
 
 /* ---------- STEP 5: duplicate check ---------- */
@@ -900,6 +1093,7 @@ async function doExport(force) {
     for (const sl of slotsAll()) { const cd = sourceFor(sl); if (!cd) continue; const r = convert(cd, sl); let b = await pngUnder(r.canvas, sl); if (b.size > MB) over.push(fname(sl)); zip.file(fname(sl), b); }
     const out = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
     if (sp.zipLimitMB && out.size > sp.zipLimitMB * MB) toast(`ZIPが${sp.zipLimitMB}MBを超えています（${(out.size / MB).toFixed(1)}MB）`); else if (over.length) toast(`1MBを超える画像があります：${over.join(', ')}`);
+    S.done = true; scheduleSave();
     showSavePanel(`${sp.zipName}_${S.mode === 'theme' ? 'set' : S.count[S.mode]}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.zip`, out, zip.file(/.*/).length);
   } catch (e) { toast('書き出しに失敗しました：' + (e.message || e.code || e)); }
   finally { renderBar(); }
@@ -910,9 +1104,10 @@ function showSavePanel(name, blob, n) {
   const cf = $('cf'), file = new File([blob], name, { type: 'application/zip' });
   const share = !dl && typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] });
   cf.innerHTML = `<div class="savebox" role="status"><div><b>ZIPができました</b><span class="hint">${esc(name)}・${n}枚・${(blob.size / MB).toFixed(1)}MB</span></div>
-    <div class="row"><button class="btn hi" id="svz" type="button">ZIPを保存</button>${share ? '<button class="btn" id="svs" type="button">共有・保存（スマホ）</button>' : ''}</div>
+    <div class="row"><button class="btn hi" id="svz" type="button">ZIPを保存</button>${share ? '<button class="btn" id="svs" type="button">共有・保存（スマホ）</button>' : ''}<button class="btn ghost" id="svn" type="button">次のセットを作る</button></div>
     <p class="hint">${share ? 'iPhoneは「共有・保存」→「“ファイル”に保存」を選ぶと、ファイルアプリの好きな場所に保存できます。「ZIPを保存」ではダウンロードフォルダに入ります。' : IS_MOBILE ? '「ZIPを保存」を押すと、ダウンロードフォルダ（iPhoneはファイルアプリの「ダウンロード」）に保存されます。' : '保存先はブラウザのダウンロードフォルダです。'}</p></div>`;
   cf.querySelector('#svz').onclick = () => saveFile(name, blob);
+  cf.querySelector('#svn').onclick = () => { clearWork(); S.maxStep = 0; go(0); toast('新しいセットを始めます。種類と個数を選んでください'); };
   if (share) cf.querySelector('#svs').onclick = async () => { try { await navigator.share({ files: [file] }); toast('共有画面で保存先を選んでください'); } catch (e) { if (e.name !== 'AbortError') { toast('共有できませんでした。「ZIPを保存」をお使いください'); } } };
   cf.scrollIntoView({ behavior: 'smooth', block: 'center' });
   if (!IS_MOBILE && !dl) saveFile(name, blob); // computers: start the download right away as before
@@ -944,8 +1139,8 @@ async function saveNow() {
     }
     if (S.cands.some(c => !c.rawBlob || (c.proc && !c.procBlob))) { scheduleSave(); return; }
     await STORE.set('work', { v: 1, at: Date.now(), uid, mode: S.mode, count: S.count, themeOpt: S.themeOpt, margin: S.margin, stickerFit: S.stickerFit, themeBg: S.themeBg, mirror: S.mirror,
-      picked: S.picked, mainId: S.mainId, tabId: S.tabId, themeAssign: S.themeAssign, fileNames: S.fileNames, words: S.words, dupOk: S.dupOk, step: S.step,
-      cands: S.cands.map(c => ({ id: c.id, raw: c.rawBlob, proc: c.procBlob, transparent: c.transparent, sheetId: c.sheetId })) });
+      picked: S.picked, mainId: S.mainId, tabId: S.tabId, themeAssign: S.themeAssign, fileNames: S.fileNames, words: S.words, dupOk: S.dupOk, step: S.step, done: S.done,
+      cands: S.cands.map(c => ({ id: c.id, raw: c.rawBlob, proc: c.procBlob, transparent: c.transparent, sheetId: c.sheetId, manual: !!c.manual })) });
     lastSaved = Date.now(); const m = $('saved'); if (m) m.textContent = '自動保存しました';
   } catch (e) { /* storage unavailable (private mode etc.): the tool still works without it */ }
 }
@@ -955,7 +1150,8 @@ async function restore(data) {
   try {
     const cands = [];
     for (const c of data.cands) { const raw = await blobToCanvas(c.raw); const proc = c.proc ? await blobToCanvas(c.proc) : null;
-      cands.push({ id: c.id, raw, proc, transparent: c.transparent, sheetId: c.sheetId, rawBlob: c.raw, procBlob: c.proc, url: thumbURL(proc || raw), rawUrl: proc ? thumbURL(raw) : undefined }); }
+      cands.push({ id: c.id, raw, proc, transparent: c.transparent, sheetId: c.sheetId, manual: !!c.manual, ver: 0, rawBlob: c.raw, procBlob: c.proc, url: thumbURL(proc || raw), rawUrl: proc ? thumbURL(raw) : undefined }); }
+    clearWork(); S.byMode = {};
     Object.assign(S, { mode: data.mode, count: data.count, themeOpt: data.themeOpt, margin: data.margin, stickerFit: data.stickerFit, themeBg: data.themeBg, mirror: data.mirror,
       picked: data.picked || [], mainId: data.mainId, tabId: data.tabId, themeAssign: data.themeAssign || {}, fileNames: data.fileNames || {}, words: data.words || {}, dupOk: data.dupOk || {}, cands });
     uid = Math.max(uid, data.uid || 0, ...cands.map(c => c.id)) + 1;
@@ -966,6 +1162,7 @@ async function restore(data) {
 let pendingResume = null;
 async function offerResume() {
   let data = null; try { data = await STORE.get('work'); } catch (e) { saveReady = true; return; }
+  if (data && data.done) { try { await STORE.del('work'); } catch (e) {} saveReady = true; return; } // finished set: nothing to resume
   if (!data || !data.cands || !data.cands.length) { saveReady = true; return; }
   pendingResume = data; render();
 }
@@ -1004,7 +1201,7 @@ function makeSample() {
 
 /* ---------- wiring ---------- */
 $('back').onclick = () => go(S.step - 1);
-$('next').onclick = () => { if (S.step === 5) doExport(false); else go(S.step + 1); };
+$('next').onclick = () => { if (S.step === 5) doExport(false); else { if (S.step === 0) freshIfDone(); go(S.step + 1); } };
 document.addEventListener('paste', e => { const f = [...(e.clipboardData?.files || [])]; if (f.length) { S.step = 1; S.maxStep = Math.max(S.maxStep, 1); addFiles(f); } });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') $('pop').innerHTML = '';
