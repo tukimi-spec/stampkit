@@ -151,6 +151,8 @@ button,select,input{font:inherit;color:inherit}
 .cand .num{position:absolute;left:-8px;top:-8px;min-width:30px;height:30px;border-radius:15px;background:var(--surface);border:2px solid var(--line);display:grid;place-items:center;font:400 13px var(--f-display);padding:0 6px}
 .cand[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)}
 .cand[aria-pressed="true"] .num{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.cand .er{padding:3px 8px;font-size:12px;min-height:0}
+.out footer .er{justify-self:start;margin-top:4px;padding:3px 10px;font-size:12px;min-height:0}
 .cand .del{position:absolute;right:4px;top:4px;width:26px;height:26px;border-radius:50%;border:0;background:var(--surface);box-shadow:0 1px 3px rgba(0,0,0,.25);cursor:pointer;font-size:13px}
 .pill{font:500 11px var(--f-body);border-radius:999px;padding:1px 8px;white-space:nowrap}
 .pill.ok{background:color-mix(in srgb,var(--ok) 15%,transparent);color:var(--ok)}
@@ -329,7 +331,7 @@ const S = {
   margin: { sticker: 10, emoji: 2, theme: 6 }, stickerFit: 'fixed', themeBg: '#ffffff', mirror: true,
   sheets: [], active: null, selBox: null,
   cands: [], picked: [], mainId: null, tabId: null, themeAssign: {},
-  tol: 40, reviewBg: 'chk', maxStep: 0, zoom: 1, fileNames: {}, words: {}, dupOk: {},
+  tol: null, reviewBg: 'chk', maxStep: 0, zoom: 1, fileNames: {}, words: {}, dupOk: {},
   holes: false, erode: 0, done: false, byMode: {},
 };
 /* ---------- work is kept per kind (sticker / emoji / theme), and a finished set is not carried over ---------- */
@@ -410,34 +412,113 @@ function bgPalette(d, w, h) {
   }
   return pal;
 }
-function removeBg(src, tol, o = {}) {
-  const holes = o.holes ?? S.holes, erode = o.erode ?? S.erode, fast = !!o.fast;
-  const w = src.width, h = src.height, c = mk(w, h), x = ctx2(c); x.drawImage(src, 0, 0);
-  const id = x.getImageData(0, 0, w, h), d = id.data, N = w * h, pal = bgPalette(d, w, h);
-  // distance of every pixel to the nearest background colour (max channel difference)
-  const D = new Uint8Array(N), B = new Uint8Array(N);
-  for (let p = 0, i = 0; p < N; p++, i += 4) {
-    if (d[i + 3] < 20) { D[p] = 0; continue; }
-    let best = 255, bi = 0; for (let k = 0; k < pal.length; k++) { const q = pal[k]; const v = Math.max(Math.abs(d[i] - q[0]), Math.abs(d[i + 1] - q[1]), Math.abs(d[i + 2] - q[2])); if (v < best) { best = v; bi = k; } }
-    D[p] = best; B[p] = bi;
+
+// automatic tolerance: just above the noise of the border background
+function autoTol(d, w, h, pal) {
+  const v = [], sx = Math.max(1, Math.floor(w / 80)), sy = Math.max(1, Math.floor(h / 80));
+  const at = (x, y) => { const i = (y * w + x) * 4; if (d[i + 3] < 20) return; let b = 255; for (const q of pal) b = Math.min(b, Math.max(Math.abs(d[i] - q[0]), Math.abs(d[i + 1] - q[1]), Math.abs(d[i + 2] - q[2]))); v.push(b); };
+  for (let x = 0; x < w; x += sx) { at(x, 0); at(x, h - 1); } for (let y = 0; y < h; y += sy) { at(0, y); at(w - 1, y); }
+  v.sort((a, b) => a - b); const q = v.length ? v[Math.floor(v.length * 0.8)] : 0; // 80%: ignore bits of drawing that touch the edge
+  return Math.max(14, Math.min(40, Math.round(q * 2.2 + 12)));
+}
+// ---- fake checkerboard background ----
+function detectChecker(d, w, h) {
+  if (w < 24 || h < 24) return null;
+  const px = (x, y) => { const i = (y * w + x) * 4; return [d[i], d[i + 1], d[i + 2], d[i + 3]]; };
+  const lum = (c) => (c[0] + c[1] + c[2]) / 3, sat = (c) => Math.max(c[0], c[1], c[2]) - Math.min(c[0], c[1], c[2]);
+  // two neutral colours on the border
+  const S0 = []; for (let x = 0; x < w; x++) { S0.push(px(x, 1)); S0.push(px(x, h - 2)); } for (let y = 0; y < h; y++) { S0.push(px(1, y)); S0.push(px(w - 2, y)); }
+  const ne = S0.filter(c => c[3] > 200 && sat(c) < 18); if (ne.length < S0.length * 0.5) return null;
+  let a = Math.min(...ne.map(lum)), b = Math.max(...ne.map(lum));
+  for (let it = 0; it < 8; it++) { let sa = 0, na = 0, sb = 0, nb = 0; for (const c of ne) { const l = lum(c); if (Math.abs(l - a) < Math.abs(l - b)) { sa += l; na++; } else { sb += l; nb++; } } if (!na || !nb) return null; a = sa / na; b = sb / nb; }
+  const contrast = b - a; if (contrast < 9) return null;
+  const tolM = Math.max(5, Math.min(16, contrast * 0.42));
+  const lab = (c) => c[3] < 200 || sat(c) >= 18 ? -1 : Math.abs(lum(c) - a) <= tolM ? 0 : Math.abs(lum(c) - b) <= tolM ? 1 : -1;
+  // cell size and phase from the label changes along border lines
+  const axis = (len, get) => {
+    let best = null;
+    for (const line of [1, 2]) {
+      const L = []; for (let i = 0; i < len; i++) L.push(lab(get(i, line)));
+      const L2 = []; for (let i = 0; i < len; i++) L2.push(lab(get(i, line, true)));
+      for (const arr of [L, L2]) {
+        const t = []; let prev = -1, pi = -1;
+        for (let i = 0; i < len; i++) { const v = arr[i]; if (v < 0) continue; if (prev >= 0 && v !== prev) t.push((pi + i) / 2); prev = v; pi = i; }
+        if (t.length < 3) continue;
+        const gaps = []; for (let i = 1; i < t.length; i++) gaps.push(t[i] - t[i - 1]); gaps.sort((p, q) => p - q);
+        const g = gaps[gaps.length >> 1]; if (g < 3) continue;
+        const ok = gaps.filter(v => Math.abs(v / g - Math.round(v / g)) < 0.2).length / gaps.length; if (ok < 0.75) continue;
+        // least squares on t ≈ t0 + k * P
+        let sk = 0, st = 0, skk = 0, skt = 0; const n = t.length;
+        for (const v of t) { const k = Math.round((v - t[0]) / g); sk += k; st += v; skk += k * k; skt += k * v; }
+        const den = n * skk - sk * sk; const P = den ? (n * skt - sk * st) / den : g; const t0 = (st - P * sk) / n;
+        if (P >= 3 && (!best || n > best.n)) best = { P, t0, n };
+      }
+    }
+    return best;
+  };
+  const ax = axis(w, (i, l, far) => px(i, far ? h - 1 - l : l)), ay = axis(h, (i, l, far) => px(far ? w - 1 - l : l, i));
+  if (!ax && !ay) return null;
+  const P = ax && ay ? (ax.P * ax.n + ay.P * ay.n) / (ax.n + ay.n) : (ax || ay).P;
+  let x0 = ax ? ax.t0 : 0, y0 = ay ? ay.t0 : 0;
+  const pred = (x, y) => (Math.floor((x - x0 + 0.5) / P) + Math.floor((y - y0 + 0.5) / P)) & 1;
+  // if one axis had no changes, try both phases for it
+  const score = () => { let ok = 0, n = 0, base0 = 0; for (const c of [[0, 1], [1, 0]]) {} const pts = []; for (let x = 0; x < w; x += 2) pts.push([x, 1], [x, h - 2]); for (let y = 0; y < h; y += 2) pts.push([1, y], [w - 2, y]);
+    let m0 = 0, m1 = 0; for (const [x, y] of pts) { const l = lab(px(x, y)); if (l < 0) continue; n++; if (l === pred(x, y)) m0++; else m1++; } return { n, acc: n ? Math.max(m0, m1) / n : 0, flip: m1 > m0 ? 1 : 0, total: pts.length }; };
+  let sc = score();
+  if (!ax || !ay) { const alt = { x0, y0 }; if (!ax) x0 += P; else y0 += P; const s2 = score(); if (s2.acc < sc.acc) { x0 = alt.x0; y0 = alt.y0; } else sc = s2; }
+  if (sc.n < sc.total * 0.4 || sc.acc < 0.85) return null;
+  const colOf = (L) => { let r = 0, gg = 0, bb = 0, n = 0; for (const c of ne) if (Math.abs(lum(c) - L) <= tolM) { r += c[0]; gg += c[1]; bb += c[2]; n++; } return [r / n, gg / n, bb / n]; };
+  return { P, x0, y0, flip: sc.flip, ca: colOf(a), cb: colOf(b), tolM };
+}
+function removeChecker(d, w, h, ck, erode) {
+  const { P, x0, y0, flip, ca, cb, tolM } = ck, N = w * h;
+  const cellX = (x) => Math.floor((x - x0 + 0.5) / P), cellY = (y) => Math.floor((y - y0 + 0.5) / P);
+  const kind = (x, y) => ((cellX(x) + cellY(y)) & 1) ^ flip; // 0 → darker colour (ca), 1 → lighter (cb)
+  const dist = (i, c) => Math.max(Math.abs(d[i] - c[0]), Math.abs(d[i + 1] - c[1]), Math.abs(d[i + 2] - c[2]));
+  const edgeDist = (v, v0) => { const f = ((v - v0 + 0.5) / P) % 1; const r = (f < 0 ? f + 1 : f) * P; return Math.min(r, P - r); };
+  const mt = tolM * 1.15;
+  const lo = Math.min(ca[0], cb[0]) - 4, hi = Math.max(cb[0], ca[0]) + 4, lumIn = (i) => d[i] >= lo && d[i] <= hi && Math.abs(d[i] - d[i + 1]) < 10 && Math.abs(d[i] - d[i + 2]) < 10; // a blend of the two squares
+  const fg = new Uint8Array(N), amb = new Uint8Array(N), D = new Uint8Array(N), bgc = new Uint8Array(N); const seam = [];
+  for (let y = 0; y < h; y++) { const ey = edgeDist(y, y0) < 1.6; for (let x = 0; x < w; x++) {
+    const p = y * w + x, i = p * 4; if (d[i + 3] < 20) { D[p] = 0; continue; }
+    const k = kind(x, y), own = k ? cb : ca, oth = k ? ca : cb, near = ey || edgeDist(x, x0) < 1.6;
+    const dO = dist(i, own), dX = dist(i, oth); D[p] = Math.min(255, near ? Math.min(dO, dX) : dO); bgc[p] = near && dX < dO ? 1 - k : k;
+    const match = dO <= mt || (near && (dX <= mt || Math.min(dO, dX) <= mt * 1.6 && lumIn(i)));
+    if (!match) fg[p] = 1; else if (k === 1 && !near) amb[p] = 1; // a light square could also be a white outline / fill
+    else if (near && (k === 1 ? dO : dX) <= mt && (k === 0 ? dO : dX) > mt) seam.push(p); // edge pixel that only looks like the light colour
+  } }
+  // light squares: decide from the squares around them (their edges are reliable)
+  const cx0 = cellX(0), cx1 = cellX(w - 1), cy0 = cellY(0), cy1 = cellY(h - 1);
+  for (let cy = cy0; cy <= cy1; cy++) for (let cxx = cx0; cxx <= cx1; cxx++) {
+    const X0 = Math.max(0, Math.ceil(x0 - 0.5 + cxx * P)), X1 = Math.min(w - 1, Math.floor(x0 - 0.5 + (cxx + 1) * P - 1e-6)), Y0 = Math.max(0, Math.ceil(y0 - 0.5 + cy * P)), Y1 = Math.min(h - 1, Math.floor(y0 - 0.5 + (cy + 1) * P - 1e-6));
+    if (X1 < X0 || Y1 < Y0) continue; if (kind(Math.min(w - 1, X0 + 1), Math.min(h - 1, Y0 + 1)) !== 1) continue;
+    let any = false; for (let y = Y0; y <= Y1 && !any; y++) for (let x = X0; x <= X1; x++) if (amb[y * w + x]) { any = true; break; }
+    if (!any) continue;
+    // look 2px outside this square in the same row / column (those pixels sit in dark squares and are reliable)
+    const F = (x, y) => (x >= 0 && y >= 0 && x < w && y < h) ? fg[y * w + x] : -1, off = Math.max(2, Math.min(4, Math.round(P / 4)));
+    for (let y = Y0; y <= Y1; y++) for (let x = X0; x <= X1; x++) { const p = y * w + x; if (!amb[p]) continue;
+      const L = F(X0 - off, y), Rr = F(X1 + off, y), T = F(x, Y0 - off), B = F(x, Y1 + off);
+      if ((L === 1 && Rr === 1) || (T === 1 && B === 1)) { fg[p] = 1; D[p] = 255; continue; }
+      if ((L === 0 && Rr === 0) || (T === 0 && B === 0)) continue; // background on both sides of this row / column
+      let sw = 0, sf = 0; const add = (f, dd) => { if (f < 0) return; const wt = 1 / (dd * dd); sw += wt; sf += wt * f; };
+      add(L, x - X0 + off); add(Rr, X1 + off - x); add(T, y - Y0 + off); add(B, Y1 + off - y);
+      if (sw && sf / sw > 0.5) { fg[p] = 1; D[p] = 255; } }
   }
-  const seen = new Uint8Array(N), st = new Int32Array(N); let sp = 0;
-  const soft = Math.min(255, tol * 1.8), step = Math.max(6, tol / 4);
-  const loc = (p, q) => { const i = p * 4, j = q * 4; return Math.max(Math.abs(d[i] - d[j]), Math.abs(d[i + 1] - d[j + 1]), Math.abs(d[i + 2] - d[j + 2])); };
-  const seed = (p) => { if (!seen[p] && D[p] <= tol) { seen[p] = 1; st[sp++] = p; } };
-  const grow = (p, q) => { if (seen[q]) return; if (D[q] <= tol || (D[q] <= soft && loc(p, q) <= step)) { seen[q] = 1; st[sp++] = q; } };
-  for (let i = 0; i < w; i++) { seed(i); seed((h - 1) * w + i); } for (let j = 0; j < h; j++) { seed(j * w); seed(j * w + w - 1); }
-  while (sp) { const p = st[--sp], px = p % w; if (px > 0) grow(p, p - 1); if (px < w - 1) grow(p, p + 1); if (p >= w) grow(p, p - w); if (p < N - w) grow(p, p + w); }
-  if (holes) { // enclosed areas whose colour is (on average) the background colour, big enough not to be an eye highlight
-    const meanMax = Math.max(10, tol * 0.35), minA = Math.max(24, N * 0.0012), lab = new Uint8Array(N);
-    for (let p0 = 0; p0 < N; p0++) { if (seen[p0] || lab[p0] || D[p0] > tol) continue;
-      const comp = []; let sum = 0; lab[p0] = 1; st[0] = p0; sp = 1;
-      while (sp) { const p = st[--sp]; comp.push(p); sum += D[p]; const px = p % w;
-        for (const q of [px > 0 ? p - 1 : -1, px < w - 1 ? p + 1 : -1, p >= w ? p - w : -1, p < N - w ? p + w : -1]) if (q >= 0 && !seen[q] && !lab[q] && D[q] <= tol) { lab[q] = 1; st[sp++] = q; } }
-      if (comp.length >= minA && sum / comp.length <= meanMax) for (const p of comp) seen[p] = 1; }
-  }
-  for (let p = 0; p < N; p++) if (seen[p]) d[p * 4 + 3] = 0;
-  if (fast) { x.putImageData(id, 0, 0); return c; }
+  // seams between squares inside a white outline / fill
+  for (let pass = 0; pass < 2; pass++) for (const p of seam) { if (fg[p]) continue; const px = p % w;
+    const hz = px >= 3 && px < w - 3 && fg[p - 3] && fg[p + 3], vt = p >= 3 * w && p < N - 3 * w && fg[p - 3 * w] && fg[p + 3 * w];
+    if (hz || vt) { fg[p] = 1; D[p] = 255; } }
+  // isolated tiny "background" pockets inside the drawing are part of the drawing
+  const seen = new Uint8Array(N), st = new Int32Array(N), minA = P * P * 1.5;
+  for (let p0 = 0; p0 < N; p0++) { if (fg[p0] || seen[p0]) continue; const comp = [p0]; seen[p0] = 1; let k2 = 0, touches = false;
+    while (k2 < comp.length) { const p = comp[k2++], px = p % w, py = (p / w) | 0; if (px === 0 || py === 0 || px === w - 1 || py === h - 1) touches = true;
+      for (const q of [px > 0 ? p - 1 : -1, px < w - 1 ? p + 1 : -1, p >= w ? p - w : -1, p < N - w ? p + w : -1]) if (q >= 0 && !fg[q] && !seen[q]) { seen[q] = 1; comp.push(q); } }
+    if (!touches && comp.length < minA) for (const p of comp) { fg[p] = 1; D[p] = 255; } }
+  const bgMask = new Uint8Array(N); for (let p = 0; p < N; p++) if (!fg[p]) { bgMask[p] = 1; d[p * 4 + 3] = 0; }
+  finishEdges(d, w, h, bgMask, D, (p) => bgc[p] ? cb : ca, tolM * 2, erode);
+}
+function finishEdges(d, w, h, seen, D, bgAt, tol, erode) {
+  const N = w * h;
   // edge band (2px) → estimate how much background is mixed in, and take it out again
   const band = new Uint8Array(N);
   for (let r = 1; r <= 2; r++) for (let p = 0; p < N; p++) { if (seen[p] || band[p]) continue; const px = p % w;
@@ -449,7 +530,7 @@ function removeBg(src, tol, o = {}) {
     const i = p * 4; let a = Di ? Math.min(1, D[p] / Di) : 1;
     if (D[p] <= tol * 0.55) a = Math.min(a, 0.15);
     if (a < 0.1) { d[i + 3] = 0; continue; }
-    if (a < 0.98) { const q = pal[B[p]]; for (let k = 0; k < 3; k++) d[i + k] = Math.max(0, Math.min(255, Math.round((d[i + k] - (1 - a) * q[k]) / a))); }
+    if (a < 0.98) { const q = bgAt(p); for (let k = 0; k < 3; k++) d[i + k] = Math.max(0, Math.min(255, Math.round((d[i + k] - (1 - a) * q[k]) / a))); }
     d[i + 3] = Math.round(d[i + 3] * a);
   }
   for (let e = 0; e < erode; e++) { const kill = []; for (let p = 0; p < N; p++) { if (!d[p * 4 + 3]) continue; const px = p % w;
@@ -463,6 +544,40 @@ function removeBg(src, tol, o = {}) {
         if (q >= 0 && !vis[q] && d[q * 4 + 3]) { vis[q] = 1; comp.push(q); }
       if (comp.length > maxSpeck) { big = true; } }
     if (!big) for (const p of comp) d[p * 4 + 3] = 0; }
+}
+function removeBg(src, tol, o = {}) {
+  const holes = o.holes ?? S.holes, erode = o.erode ?? S.erode, fast = !!o.fast;
+  const w = src.width, h = src.height, c = mk(w, h), x = ctx2(c); x.drawImage(src, 0, 0);
+  const id = x.getImageData(0, 0, w, h), d = id.data, N = w * h;
+  // a background drawn as a grey/white checker pattern (common in AI images) gets its own treatment
+  if (!fast && o.checker !== false) { const ck = detectChecker(d, w, h); if (ck) { removeChecker(d, w, h, ck, erode); x.putImageData(id, 0, 0); return c; } }
+  const pal = bgPalette(d, w, h);
+  if (tol == null) tol = autoTol(d, w, h, pal);
+  // distance of every pixel to the nearest background colour (max channel difference)
+  const D = new Uint8Array(N), B = new Uint8Array(N);
+  for (let p = 0, i = 0; p < N; p++, i += 4) {
+    if (d[i + 3] < 20) { D[p] = 0; continue; }
+    let best = 255, bi = 0; for (let k = 0; k < pal.length; k++) { const q = pal[k]; const v = Math.max(Math.abs(d[i] - q[0]), Math.abs(d[i + 1] - q[1]), Math.abs(d[i + 2] - q[2])); if (v < best) { best = v; bi = k; } }
+    D[p] = best; B[p] = bi;
+  }
+  const seen = new Uint8Array(N), st = new Int32Array(N); let sp = 0;
+  const soft = Math.min(255, tol * 1.8), step = Math.max(6, tol / 4);
+  const loc = (p, q) => { const i = p * 4, j = q * 4; return Math.max(Math.abs(d[i] - d[j]), Math.abs(d[i + 1] - d[j + 1]), Math.abs(d[i + 2] - d[j + 2])); };
+  const seed = (p) => { if (!seen[p] && D[p] <= tol) { seen[p] = 1; st[sp++] = p; } };
+  const grow = (p, q) => { if (seen[q]) return; if (D[q] <= tol || (D[q] <= soft && D[q] <= D[p] + 4 && loc(p, q) <= step)) { seen[q] = 1; st[sp++] = q; } }; // gentle gradients only: never climb into a lighter outline / fill
+  for (let i = 0; i < w; i++) { seed(i); seed((h - 1) * w + i); } for (let j = 0; j < h; j++) { seed(j * w); seed(j * w + w - 1); }
+  while (sp) { const p = st[--sp], px = p % w; if (px > 0) grow(p, p - 1); if (px < w - 1) grow(p, p + 1); if (p >= w) grow(p, p - w); if (p < N - w) grow(p, p + w); }
+  if (holes) { // enclosed areas whose colour is (on average) the background colour, big enough not to be an eye highlight
+    const meanMax = Math.max(10, tol * 0.35), minA = Math.max(24, N * 0.0012), lab = new Uint8Array(N);
+    for (let p0 = 0; p0 < N; p0++) { if (seen[p0] || lab[p0] || D[p0] > tol) continue;
+      const comp = []; let sum = 0; lab[p0] = 1; st[0] = p0; sp = 1;
+      while (sp) { const p = st[--sp]; comp.push(p); sum += D[p]; const px = p % w;
+        for (const q of [px > 0 ? p - 1 : -1, px < w - 1 ? p + 1 : -1, p >= w ? p - w : -1, p < N - w ? p + w : -1]) if (q >= 0 && !seen[q] && !lab[q] && D[q] <= tol) { lab[q] = 1; st[sp++] = q; } }
+      if (comp.length >= minA && sum / comp.length <= meanMax) for (const p of comp) seen[p] = 1; }
+  }
+  for (let p = 0; p < N; p++) if (seen[p]) d[p * 4 + 3] = 0;
+  if (fast) { x.putImageData(id, 0, 0); return c; }
+  finishEdges(d, w, h, seen, D, (p) => pal[B[p]], tol, erode);
   x.putImageData(id, 0, 0); return c;
 }
 function detect(c, gapPx) {
@@ -673,7 +788,8 @@ function drawCutList(host) {
   if (!host) return; host.innerHTML = '';
   if (!S.cands.length) return;
   const c = el(`<div style="margin-top:20px"><h3 style="font-size:15px;margin-bottom:8px">切り出した絵 <span class="mono">${S.cands.length}</span>枚</h3><div class="cands"></div></div>`);
-  S.cands.forEach(cd => { const d = el(`<div class="cand" style="cursor:default"><div class="im chk"><img alt="" src="${cd.url}"></div><div class="cap"><span>#${cd.id}</span>${isClear(cd) ? '<span class="pill ok">透過</span>' : '<span class="pill warn">背景あり</span>'}</div><button class="del" type="button" aria-label="この絵を削除">×</button></div>`);
+  S.cands.forEach(cd => { const d = el(`<div class="cand" style="cursor:default"><div class="im chk"><img alt="" src="${cd.url}"></div><div class="cap"><span>#${cd.id}</span>${isClear(cd) ? '<span class="pill ok">透過</span>' : '<span class="pill warn">背景あり</span>'}</div><button class="btn sm ghost er" type="button" data-er>消しゴム</button><button class="del" type="button" aria-label="この絵を削除">×</button></div>`);
+    d.querySelector('[data-er]').onclick = () => openTouchUp(cd, 'erase');
     d.querySelector('.del').onclick = () => { const sh = sheet(cd.sheetId); if (sh) { const i = sh.boxes.findIndex(b => b.cid === cd.id); if (i >= 0) sh.boxes.splice(i, 1); } removeCand(cd.id); };
     c.querySelector('.cands').appendChild(d); });
   host.appendChild(c);
@@ -830,7 +946,7 @@ function openPicker(title, list, onPick, onClear) {
 
 /* ---------- STEP 4: transparency ---------- */
 const tSel = new Set(); let tInit = false, tq; const prevCache = new Map();
-const tOpts = () => `${S.tol}|${S.holes ? 1 : 0}|${S.erode}`;
+const tOpts = () => `${S.tol ?? 'auto'}|${S.holes ? 1 : 0}|${S.erode}`;
 // every change of the transparent image goes through here so all caches see a new version
 function setProc(cd, canvas, manual) {
   if (canvas && !cd.rawUrl) cd.rawUrl = cd.url && !cd.proc ? cd.url : thumbURL(cd.raw);
@@ -846,7 +962,8 @@ function vClear(v) {
   const p = el(`<section class="panel"><div class="ph"><div><span class="eyebrow">Step 4</span><h2>背景の透過チェック</h2><p class="lead">選んだ絵 ${used.length}枚を確認しました。元から透過済みの絵はそのまま使い、背景が残っている絵だけを透過処理します。消し残しがあるときは「手で直す」で、なぞって消せます。</p></div></div><div id="body"></div></section>`);
   v.appendChild(p); const body = p.querySelector('#body');
   if (!used.length) { body.innerHTML = '<div class="empty">まだ絵が選ばれていません。Step 3 で選んでください。</div>'; return; }
-  const opts = `<div class="row" style="align-items:flex-end"><label class="field" style="min-width:220px;flex:1">背景として消す色の幅 <output id="to">${S.tol}</output><input type="range" id="tol" min="4" max="120" value="${S.tol}"></label></div>
+  const opts = `<div class="row" style="align-items:flex-end"><label class="field" style="min-width:220px;flex:1">背景として消す色の幅 <output id="to">${S.tol == null ? '自動' : S.tol}</output><input type="range" id="tol" min="4" max="120" value="${S.tol ?? 24}"></label>${S.tol == null ? '' : '<button class="btn sm ghost" id="tauto" type="button">自動に戻す</button>'}</div>
+      <p class="hint" style="margin:0">「自動」は絵ごとに背景のムラを見て幅を決めます。チェック柄（白とグレーの市松模様）の背景も見分けて、柄の部分だけを消します。</p>
       <div class="row" style="gap:16px"><label class="check"><input type="checkbox" id="holes" ${S.holes ? 'checked' : ''}> 腕と体のすき間など、<b>囲まれた背景</b>も消す</label>
       <label class="check">ふちを細く削る <select id="erode" aria-label="ふちを削る幅"><option value="0" ${S.erode == 0 ? 'selected' : ''}>なし</option><option value="1" ${S.erode == 1 ? 'selected' : ''}>1px</option><option value="2" ${S.erode == 2 ? 'selected' : ''}>2px</option></select></label></div>
       <p class="hint">背景とつながった部分を消し、ふちに混ざった背景色も取り除きます（白いフチが残りにくくなります）。消えすぎるときは幅を小さく、背景が残るときは大きく。すき間が残るときは「囲まれた背景も消す」、ふちに色が残るときは「ふちを削る」を試してください。</p>`;
@@ -873,6 +990,7 @@ function vClear(v) {
   });
   const later = () => { clearTimeout(tq); tq = setTimeout(render, 250); };
   body.querySelectorAll('#tol').forEach(t => t.oninput = e => { S.tol = +e.target.value; body.querySelectorAll('#to').forEach(o => o.textContent = S.tol); later(); });
+  body.querySelectorAll('#tauto').forEach(t => t.onclick = () => { S.tol = null; render(); });
   body.querySelectorAll('#holes').forEach(t => t.onchange = e => { S.holes = e.target.checked; render(); });
   body.querySelectorAll('#erode').forEach(t => t.onchange = e => { S.erode = +e.target.value; render(); });
   const d = body.querySelector('#doit'); if (d) d.onclick = () => runClear(todo.filter(cd => tSel.has(cd.id) && !cd.proc), '透過しました', '透過する絵がチェックされていません');
@@ -893,25 +1011,42 @@ function removeBgPreview(cd) {
 }
 
 /* ---------- hand touch-up: brush erase / brush restore / tap to erase a colour area ---------- */
-function openTouchUp(cd) {
-  const raw = cd.raw, W = raw.width, H = raw.height;
+// eraser result → cut the same parts out of the original (and of the transparent version, if any)
+function applyErase(cd, before, after) {
+  const W = cd.raw.width, H = cd.raw.height, bd = ctx2(before).getImageData(0, 0, W, H).data, ad = ctx2(after).getImageData(0, 0, W, H).data;
+  const r = mk(W, H), rx = ctx2(r); rx.drawImage(cd.raw, 0, 0); const id = rx.getImageData(0, 0, W, H), d = id.data;
+  for (let i = 3; i < d.length; i += 4) { if (cd.proc) { if (bd[i] > 0) d[i] = Math.round(d[i] * Math.min(1, ad[i] / bd[i])); } else d[i] = ad[i] < bd[i] ? Math.round(d[i] * ad[i] / Math.max(1, bd[i])) : d[i]; }
+  rx.putImageData(id, 0, 0);
+  if (!cd.proc) { // without transparency the restore brush may also have brought pixels back: take the result as is
+    cd.raw = after; } else { cd.raw = r; cd.proc = after; cd.procBlob = null; }
+  cd.rawBlob = null; cd.erased = true; cd.ver = (cd.ver || 0) + 1;
+  cd.rawUrl = cd.proc ? thumbURL(cd.raw) : undefined; cd.url = thumbURL(cd.proc || cd.raw);
+  for (const k of Object.keys(S.dupOk)) if (k.startsWith('look|') && k.split('|').slice(1, 3).includes(String(cd.id))) delete S.dupOk[k];
+}
+// mode 'clear': finish the transparency by hand (restore brings back the original picture)
+// mode 'erase': an eraser for the cut-out itself (e.g. a bit of the next character inside the frame)
+function openTouchUp(cd, mode = 'clear') {
+  const raw = cd.raw, W = raw.width, H = raw.height, ER = mode === 'erase';
   const work = mk(W, H), wx = ctx2(work);
-  wx.drawImage(cd.proc || (cd.transparent ? raw : removeBg(raw, S.tol)), 0, 0);
+  // 「透過する」を外した絵は、必ず元の絵から始める
+  const start = ER ? (cd.proc || raw) : cd.proc ? cd.proc : (cd.transparent || !tSel.has(cd.id)) ? raw : removeBg(raw, S.tol);
+  wx.drawImage(start, 0, 0);
+  const base = mk(W, H); ctx2(base).drawImage(ER ? (cd.proc || raw) : raw, 0, 0); // what "なぞって戻す" paints back
   const undo = []; const snap = () => { undo.push(wx.getImageData(0, 0, W, H)); if (undo.length > 20) undo.shift(); };
   let tool = 'erase', size = Math.max(6, Math.round(Math.max(W, H) / 30)), zoom = 1, bg = S.tBg || 'dark';
   const pop = el(`<div class="overlay" id="tu"><div class="sheetpop tu" role="dialog" aria-modal="true" aria-label="手で直す">
-    <div class="ph"><h2 style="font-size:17px">手で直す</h2><div class="row"><button class="btn sm ghost" id="tx" type="button">やめる</button><button class="btn sm primary" id="tok" type="button">これで決定</button></div></div>
+    <div class="ph"><h2 style="font-size:17px">${ER ? '消しゴム' : '手で直す'}</h2><div class="row"><button class="btn sm ghost" id="tx" type="button">やめる</button><button class="btn sm primary" id="tok" type="button">これで決定</button></div></div>
     <div class="seg" role="group" aria-label="道具" id="tools">${[['erase', 'なぞって消す'], ['restore', 'なぞって戻す'], ['wand', 'タップで同じ色を消す'], ['pan', '動かす']].map(([k, l]) => `<button type="button" data-t="${k}">${l}</button>`).join('')}</div>
     <div class="tuwrap" id="tw"><div class="tustage" id="tst"><canvas id="tc"></canvas><div class="tucur" id="tcur" hidden></div></div></div>
     <div class="row" style="gap:8px 12px;margin-top:8px"><label class="field" style="flex:1;min-width:150px" id="szw">ブラシの太さ <output id="szo">${size}</output><input type="range" id="sz" min="2" max="${Math.max(40, Math.round(Math.max(W, H) / 6))}" value="${size}"></label>
-      <button class="btn sm" id="tz" type="button">拡大</button><button class="btn sm" id="tun" type="button">1つ戻す</button><button class="btn sm ghost" id="tre" type="button">自動透過からやり直す</button></div>
+      <button class="btn sm" id="tz" type="button">拡大</button><button class="btn sm" id="tun" type="button">1つ戻す</button>${ER ? '<button class="btn sm ghost" id="tbase" type="button">最初の状態に戻す</button>' : '<button class="btn sm ghost" id="traw" type="button">元の絵からやり直す</button><button class="btn sm ghost" id="tre" type="button">自動透過をかけ直す</button>'}</div>
     <div class="row" style="gap:8px;margin-top:6px"><span class="hint">背景色</span><div class="seg" role="group" aria-label="背景色">${[['chk', 'チェック'], ['dark', '黒'], ['green', '緑'], ['pink', 'ピンク']].map(([k, l]) => `<button type="button" data-b="${k}">${l}</button>`).join('')}</div></div>
     <p class="hint" id="thint"></p></div></div>`);
   document.body.appendChild(pop);
   const cv = pop.querySelector('#tc'); cv.width = W; cv.height = H; const cx = ctx2(cv);
   const stage = pop.querySelector('#tst'), wrap = pop.querySelector('#tw'), cur = pop.querySelector('#tcur');
   const paint = () => { cx.clearRect(0, 0, W, H); cx.drawImage(work, 0, 0); };
-  const hints = { erase: '消したい所を指やマウスでなぞってください。', restore: '消えすぎた所をなぞると、元の絵に戻ります。', wand: '残った背景をタップすると、つながった同じ色の範囲がまとめて消えます（幅は透過の設定と同じ）。', pan: '拡大中に画像を動かします。' };
+  const hints = { erase: ER ? '消したい部分をなぞってください（透過とは別に、この絵から消えます）。' : '消したい所を指やマウスでなぞってください。', restore: ER ? '消しすぎた所をなぞると、開いた時の状態に戻ります。' : '消えすぎた所をなぞると、元の絵に戻ります。', wand: '残った背景をタップすると、つながった同じ色の範囲がまとめて消えます（幅は透過の設定と同じ）。', pan: '拡大中に画像を動かします。' };
   const sync = () => {
     pop.querySelectorAll('[data-t]').forEach(b => b.setAttribute('aria-pressed', b.dataset.t === tool));
     pop.querySelectorAll('[data-b]').forEach(b => b.setAttribute('aria-pressed', b.dataset.b === bg));
@@ -925,12 +1060,12 @@ function openTouchUp(cd) {
   const pt = (ev) => { const r = cv.getBoundingClientRect(); return { x: (ev.clientX - r.left) / r.width * W, y: (ev.clientY - r.top) / r.height * H, k: r.width / W }; };
   const dab = (x, y) => {
     if (tool === 'erase') { wx.save(); wx.globalCompositeOperation = 'destination-out'; wx.beginPath(); wx.arc(x, y, size / 2, 0, TAU2); wx.fill(); wx.restore(); }
-    else { wx.save(); wx.beginPath(); wx.arc(x, y, size / 2, 0, TAU2); wx.clip(); wx.clearRect(x - size, y - size, size * 2, size * 2); wx.drawImage(raw, 0, 0); wx.restore(); }
+    else { wx.save(); wx.beginPath(); wx.arc(x, y, size / 2, 0, TAU2); wx.clip(); wx.clearRect(x - size, y - size, size * 2, size * 2); wx.drawImage(base, 0, 0); wx.restore(); }
   };
   const wand = (x0, y0) => {
     const id = wx.getImageData(0, 0, W, H), d = id.data, sx = Math.floor(x0), sy = Math.floor(y0); if (sx < 0 || sy < 0 || sx >= W || sy >= H) return;
     const s0 = (sy * W + sx) * 4; if (d[s0 + 3] < 20) { toast('そこはもう透明です'); return; }
-    const c0 = [d[s0], d[s0 + 1], d[s0 + 2]], tl = Math.max(12, S.tol), N = W * H, seen = new Uint8Array(N), st = [sy * W + sx]; seen[sy * W + sx] = 1; let n = 0;
+    const c0 = [d[s0], d[s0 + 1], d[s0 + 2]], tl = Math.max(12, S.tol ?? 24), N = W * H, seen = new Uint8Array(N), st = [sy * W + sx]; seen[sy * W + sx] = 1; let n = 0;
     const ok = (q) => { const i = q * 4; return d[i + 3] >= 20 && Math.max(Math.abs(d[i] - c0[0]), Math.abs(d[i + 1] - c0[1]), Math.abs(d[i + 2] - c0[2])) <= tl; };
     while (st.length) { const p = st.pop(); d[p * 4 + 3] = 0; n++; const px = p % W;
       for (const q of [px > 0 ? p - 1 : -1, px < W - 1 ? p + 1 : -1, p >= W ? p - W : -1, p < N - W ? p + W : -1]) if (q >= 0 && !seen[q] && ok(q)) { seen[q] = 1; st.push(q); } }
@@ -953,10 +1088,15 @@ function openTouchUp(cd) {
   pop.querySelector('#sz').oninput = e => { size = +e.target.value; pop.querySelector('#szo').textContent = size; };
   pop.querySelector('#tz').onclick = () => { zoom = zoom > 1 ? 1 : 2.5; if (zoom === 1 && tool === 'pan') tool = 'erase'; sync(); };
   pop.querySelector('#tun').onclick = () => { const s = undo.pop(); if (s) { wx.putImageData(s, 0, 0); paint(); } sync(); };
-  pop.querySelector('#tre').onclick = () => { snap(); wx.clearRect(0, 0, W, H); wx.drawImage(cd.transparent ? raw : removeBg(raw, S.tol), 0, 0); paint(); sync(); };
+  const reset = (src) => { snap(); wx.clearRect(0, 0, W, H); wx.drawImage(src, 0, 0); paint(); sync(); };
+  if (ER) pop.querySelector('#tbase').onclick = () => reset(base);
+  else { pop.querySelector('#traw').onclick = () => reset(raw); pop.querySelector('#tre').onclick = () => reset(cd.transparent ? raw : removeBg(raw, S.tol)); }
   const close = () => pop.remove();
   pop.querySelector('#tx').onclick = close;
-  pop.querySelector('#tok').onclick = () => { const out = mk(W, H); ctx2(out).drawImage(work, 0, 0); setProc(cd, out, true); tSel.delete(cd.id); close(); toast('修正した絵を使います'); render(); };
+  pop.querySelector('#tok').onclick = () => { const out = mk(W, H); ctx2(out).drawImage(work, 0, 0);
+    if (ER) { applyErase(cd, base, out); close(); toast('消しゴムの内容を反映しました'); }
+    else { setProc(cd, out, true); tSel.delete(cd.id); close(); toast('修正した絵を使います'); }
+    if (S.step === 1) { drawCutList(document.querySelector('#cl')); scheduleSave(); } else render(); };
   paint(); sync();
 }
 
@@ -1068,7 +1208,9 @@ function vReview(v) {
     const r = convert(cd, sl); measure(r.canvas); const L = checks(r, sl), lv = levelOf(L); if (lv === 'bad') bad++; if (lv === 'warn') warn++;
     const card = el(`<div class="out"><div class="img"></div><footer><div class="nm"><span>${esc(fname(sl))}</span><span class="dot ${lv}"></span></div><ul>${L.map(x => `<li class="${x.lv}"><span class="dot ${x.lv}"></span>${x.t}</li>`).join('')}</ul></footer></div>`);
     const disp = mk(r.canvas.width, r.canvas.height); ctx2(disp).drawImage(r.canvas, 0, 0); disp.style.width = (r.canvas.width > 400 ? 300 : r.canvas.width) + 'px';
-    card.querySelector('.img').appendChild(disp); rv.appendChild(card);
+    card.querySelector('.img').appendChild(disp);
+    const eb = el('<button class="btn sm ghost er" type="button">消しゴム</button>'); eb.onclick = () => openTouchUp(cd, 'erase'); card.querySelector('footer').appendChild(eb);
+    rv.appendChild(card);
   });
   p.querySelector('#sum').innerHTML = (miss ? `<span class="pill bad">不足 ${miss}枚</span>` : '<span class="pill ok">不足なし</span>') + (bad ? `<span class="pill bad">要修正 ${bad}</span>` : '') + (warn ? `<span class="pill warn">注意 ${warn}</span>` : '') + (sp.zipLimitMB ? `<span class="pill ok">ZIP上限 ${sp.zipLimitMB}MB</span>` : '');
 }
