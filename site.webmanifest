@@ -3,8 +3,8 @@
   "short_name": "申請キット",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#eceee9",
-  "theme_color": "#16171b",
+  "background_color": "#f6ebe6",
+  "theme_color": "#f6ebe6",
   "icons": [
     {
       "src": "./icon-192.png",

@@ -1,10 +1,10 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#16171b">
+<meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#f6ebe6">
 <link rel="manifest" href="./site.webmanifest"><link rel="icon" href="./favicon.png" type="image/png"><link rel="apple-touch-icon" href="./apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="申請キット">
 </head><body><title>スタンプ申請キット</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=IBM+Plex+Mono:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&family=IBM+Plex+Mono:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
 <script>/*!
 
 JSZip v3.10.1 - A JavaScript class for generating and reading zip files
@@ -21,26 +21,22 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 <style>
 /* Layout: one-column wizard — step rail on top, sticky tally, one working area per step, fixed bottom action bar */
 :root{
-  --bg:#eceee9; --surface:#ffffff; --sunk:#f4f5f1; --ink:#16171b; --muted:#646a72; --line:#d5d8d0;
-  --accent:#2f43f5; --accent-ink:#ffffff; --hi:#ffe04a; --hi-ink:#16171b; --ok:#11804c; --warn:#a86a00; --bad:#d8303a;
-  --chk1:#ffffff; --chk2:#e2e4df; --talk:#8aa1b9;
-  --f-display:"Dela Gothic One","Zen Kaku Gothic New",system-ui,sans-serif;
+  /* soft pink-beige, warm whites, dusty-rose accents; text stays near-black */
+  --bg:#f6ebe6; --surface:#fffaf8; --sunk:#f8efea; --ink:#1d1a1c; --muted:#7a6a6e; --line:#ead9d2;
+  --accent:#b35f7a; --accent-ink:#ffffff; --hi:#f3cdcb; --hi-ink:#1d1a1c; --ok:#4c8a6e; --warn:#a46f27; --bad:#c43f4e;
+  --rose:#d89aa8; --blush:#fbe4e4; --sand:#f3e3d3;
+  --chk1:#ffffff; --chk2:#eee3df; --talk:#a9b9c9;
+  --f-display:"Zen Maru Gothic","Zen Kaku Gothic New",system-ui,sans-serif;
   --f-body:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
   --f-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
 }
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
-  --bg:#111215; --surface:#1a1c21; --sunk:#15171b; --ink:#eceef2; --muted:#9aa0aa; --line:#2d3037;
-  --accent:#7d8bff; --accent-ink:#0d0f1a; --hi:#e8cc35; --hi-ink:#16171b; --ok:#3cc483; --warn:#f0b43c; --bad:#ff626a;
-  --chk1:#2a2c32; --chk2:#202227; --talk:#4d5f73; color-scheme:dark }}
-:root[data-theme="dark"]{
-  --bg:#111215; --surface:#1a1c21; --sunk:#15171b; --ink:#eceef2; --muted:#9aa0aa; --line:#2d3037;
-  --accent:#7d8bff; --accent-ink:#0d0f1a; --hi:#e8cc35; --hi-ink:#16171b; --ok:#3cc483; --warn:#f0b43c; --bad:#ff626a;
-  --chk1:#2a2c32; --chk2:#202227; --talk:#4d5f73; color-scheme:dark }
 *{box-sizing:border-box}
 [hidden]{display:none!important}
-html,body{background:var(--bg)}
+html{background:var(--bg);background-image:radial-gradient(900px 520px at 0% -8%,var(--blush) 0%,transparent 62%),radial-gradient(800px 480px at 105% 0%,var(--sand) 0%,transparent 58%);background-repeat:no-repeat;min-height:100%}
+body{background:transparent}
 body{color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.6;padding-inline:16px;padding-block:0 120px}
-h1,h2,h3{font-family:var(--f-display);font-weight:400;margin:0;text-wrap:balance;letter-spacing:.01em}
+h1,h2,h3{font-family:var(--f-display);font-weight:700;margin:0;text-wrap:balance;letter-spacing:.03em}
 button,select,input{font:inherit;color:inherit}
 .wrap{max-width:1180px;margin:0 auto}
 .mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
@@ -64,7 +60,7 @@ button,select,input{font:inherit;color:inherit}
 .count span{font-size:16px;opacity:.6}
 .need{font-weight:700}
 .need .n{display:inline-block;background:var(--hi);color:var(--hi-ink);border-radius:6px;padding:0 8px;margin-inline:3px;font-family:var(--f-display);font-weight:400;font-size:18px}
-.need.done .n{background:#3cc483}
+.need.done .n{background:#8fc7ad}
 .meter{flex:1 1 160px;height:9px;border-radius:99px;background:color-mix(in srgb,currentColor 18%,transparent);overflow:hidden;min-width:120px}
 .meter i{display:block;height:100%;background:var(--hi);border-radius:99px;transition:width .3s}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px;margin-top:14px;min-width:0}
@@ -248,6 +244,29 @@ button,select,input{font:inherit;color:inherit}
 .confirm{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:color-mix(in srgb,var(--hi) 30%,var(--surface));border:1px solid var(--hi);border-radius:12px;padding:12px;margin-bottom:12px}
 @media (max-width:560px){ .top h1{font-size:22px} .ph h2{font-size:18px} .bar .btn{min-width:0;flex:1} .bar .msg{display:none} .cands{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))} }
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* ---- pink-beige theme details ---- */
+.top{padding-block:26px 14px}
+.top h1{font-size:27px;letter-spacing:.06em;display:flex;align-items:center;gap:10px}
+.top h1::before{content:"";width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,var(--rose),#e9b9a6);box-shadow:16px 0 0 -3px var(--hi)}
+.top h1::before{margin-right:10px}
+.panel{border-radius:20px;border-color:var(--line);box-shadow:0 10px 30px -18px rgba(150,96,104,.35)}
+.btn{border-radius:999px}
+.btn.primary{box-shadow:0 6px 16px -8px rgba(179,95,122,.7)}
+.tally{background:#2b2326;color:#fbf1ee;box-shadow:0 12px 26px -14px rgba(60,30,40,.55)}
+.tally .need .n{color:var(--hi-ink)}
+.rail button{border-radius:999px;background:color-mix(in srgb,var(--surface) 85%,transparent)}
+.rail button[aria-current="step"]{background:#2b2326;border-color:#2b2326;color:#fbf1ee}
+.count b,.need .n,.chips button,.stepper input,.rail button i{font-weight:700}
+.kind-card,.cand,.titem,.out{border-radius:16px}
+.kind-card[aria-pressed="true"]{background:var(--blush)}
+.chips button[aria-pressed="true"]{background:#2b2326;border-color:#2b2326;color:#fbf1ee}
+.seg button[aria-pressed="true"]{background:#2b2326;border-color:#2b2326;color:#fbf1ee}
+.bar{background:color-mix(in srgb,var(--surface) 88%,transparent)}
+#extra:not(:empty){background:linear-gradient(135deg,var(--blush),var(--sand));border:1px solid var(--line);border-radius:18px;padding:14px 16px}
+.resume,.ask{border-radius:16px}
+.toast{background:#2b2326;color:#fbf1ee;border-radius:999px}
+.drop{border-radius:18px}
 </style>
 
 <div class="wrap">
@@ -402,7 +421,7 @@ function bgPalette(d, w, h) {
   for (let x = 0; x < w; x += sx) { add(x, 0); add(x, h - 1); if (h > 4) { add(x, 1); add(x, h - 2); } }
   for (let y = 0; y < h; y += sy) { add(0, y); add(w - 1, y); if (w > 4) { add(1, y); add(w - 2, y); } }
   if (!pts.length) return [[255, 255, 255]];
-  const near = (a, b) => Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2])) <= 26;
+  const near = (a, b) => Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2])) <= 12; // tight: white and light grey stay two colours
   const pal = []; let rest = pts;
   while (rest.length && pal.length < 3) {
     let best = null, bn = -1; for (let i = 0; i < rest.length; i += Math.max(1, rest.length >> 7)) { let n = 0; for (const o of rest) if (near(rest[i], o)) n++; if (n > bn) { bn = n; best = rest[i]; } }
@@ -418,7 +437,8 @@ function autoTol(d, w, h, pal) {
   const v = [], sx = Math.max(1, Math.floor(w / 80)), sy = Math.max(1, Math.floor(h / 80));
   const at = (x, y) => { const i = (y * w + x) * 4; if (d[i + 3] < 20) return; let b = 255; for (const q of pal) b = Math.min(b, Math.max(Math.abs(d[i] - q[0]), Math.abs(d[i + 1] - q[1]), Math.abs(d[i + 2] - q[2]))); v.push(b); };
   for (let x = 0; x < w; x += sx) { at(x, 0); at(x, h - 1); } for (let y = 0; y < h; y += sy) { at(0, y); at(w - 1, y); }
-  v.sort((a, b) => a - b); const q = v.length ? v[Math.floor(v.length * 0.8)] : 0; // 80%: ignore bits of drawing that touch the edge
+  const bgv = v.filter(x => x <= 30).sort((a, b) => a - b); // ignore parts of the drawing that touch the edge
+  const q = bgv.length ? bgv[Math.floor(bgv.length * 0.8)] : 0;
   return Math.max(14, Math.min(40, Math.round(q * 2.2 + 12)));
 }
 // ---- fake checkerboard background ----
@@ -428,9 +448,16 @@ function detectChecker(d, w, h) {
   const lum = (c) => (c[0] + c[1] + c[2]) / 3, sat = (c) => Math.max(c[0], c[1], c[2]) - Math.min(c[0], c[1], c[2]);
   // two neutral colours on the border
   const S0 = []; for (let x = 0; x < w; x++) { S0.push(px(x, 1)); S0.push(px(x, h - 2)); } for (let y = 0; y < h; y++) { S0.push(px(1, y)); S0.push(px(w - 2, y)); }
-  const ne = S0.filter(c => c[3] > 200 && sat(c) < 18); if (ne.length < S0.length * 0.5) return null;
-  let a = Math.min(...ne.map(lum)), b = Math.max(...ne.map(lum));
-  for (let it = 0; it < 8; it++) { let sa = 0, na = 0, sb = 0, nb = 0; for (const c of ne) { const l = lum(c); if (Math.abs(l - a) < Math.abs(l - b)) { sa += l; na++; } else { sb += l; nb++; } } if (!na || !nb) return null; a = sa / na; b = sb / nb; }
+  // fake checkers are light: ignore the drawing's dark outlines on the border
+  const ne = S0.filter(c => c[3] > 200 && sat(c) < 18 && lum(c) >= 110); if (ne.length < S0.length * 0.4) return null;
+  // the two most common brightness levels
+  const hist = new Array(130).fill(0); for (const c of ne) hist[Math.min(129, Math.round(lum(c) / 2))]++;
+  const sm = hist.map((v, i) => v + (hist[i - 1] || 0) + (hist[i + 1] || 0));
+  let p1 = 0; for (let i = 0; i < sm.length; i++) if (sm[i] > sm[p1]) p1 = i;
+  let p2 = -1; for (let i = 0; i < sm.length; i++) if (Math.abs(i - p1) >= 4 && (p2 < 0 || sm[i] > sm[p2])) p2 = i;
+  if (p2 < 0 || sm[p2] < sm[p1] * 0.25) return null;
+  let a = Math.min(p1, p2) * 2, b = Math.max(p1, p2) * 2;
+  for (let it = 0; it < 6; it++) { const r = (b - a) * 0.5; let sa = 0, na = 0, sb = 0, nb = 0; for (const c of ne) { const l = lum(c); if (Math.abs(l - a) <= r && Math.abs(l - a) < Math.abs(l - b)) { sa += l; na++; } else if (Math.abs(l - b) <= r) { sb += l; nb++; } } if (!na || !nb) return null; a = sa / na; b = sb / nb; }
   const contrast = b - a; if (contrast < 9) return null;
   const tolM = Math.max(5, Math.min(16, contrast * 0.42));
   const lab = (c) => c[3] < 200 || sat(c) >= 18 ? -1 : Math.abs(lum(c) - a) <= tolM ? 0 : Math.abs(lum(c) - b) <= tolM ? 1 : -1;
@@ -563,8 +590,10 @@ function removeBg(src, tol, o = {}) {
   const seen = new Uint8Array(N), st = new Int32Array(N); let sp = 0;
   const soft = Math.min(255, tol * 1.8), step = Math.max(6, tol / 4);
   const loc = (p, q) => { const i = p * 4, j = q * 4; return Math.max(Math.abs(d[i] - d[j]), Math.abs(d[i + 1] - d[j + 1]), Math.abs(d[i + 2] - d[j + 2])); };
-  const seed = (p) => { if (!seen[p] && D[p] <= tol) { seen[p] = 1; st[sp++] = p; } };
-  const grow = (p, q) => { if (seen[q]) return; if (D[q] <= tol || (D[q] <= soft && D[q] <= D[p] + 4 && loc(p, q) <= step)) { seen[q] = 1; st[sp++] = q; } }; // gentle gradients only: never climb into a lighter outline / fill
+  // start only from pixels that are clearly background: a pale colour that touches the frame edge is not background
+  const strict = Math.max(6, Math.round(tol * 0.45)), jump = Math.max(8, strict);
+  const seed = (p) => { if (!seen[p] && D[p] <= strict) { seen[p] = 1; st[sp++] = p; } };
+  const grow = (p, q) => { if (seen[q]) return; if (D[q] <= strict || (D[q] <= tol && D[q] <= D[p] + jump) || (D[q] <= soft && D[q] <= D[p] + 4 && loc(p, q) <= step)) { seen[q] = 1; st[sp++] = q; } }; // gentle gradients only: never climb into a lighter outline / fill
   for (let i = 0; i < w; i++) { seed(i); seed((h - 1) * w + i); } for (let j = 0; j < h; j++) { seed(j * w); seed(j * w + w - 1); }
   while (sp) { const p = st[--sp], px = p % w; if (px > 0) grow(p, p - 1); if (px < w - 1) grow(p, p + 1); if (p >= w) grow(p, p - w); if (p < N - w) grow(p, p + w); }
   if (holes) { // enclosed areas whose colour is (on average) the background colour, big enough not to be an eye highlight
@@ -885,7 +914,7 @@ function vPick(v) {
   const need = S.count[S.mode];
   const p = el(`<section class="panel"><div class="ph"><div><span class="eyebrow">Step 3</span><h2>申請に使う絵を選ぶ</h2><p class="lead">使う絵をタップしてチェック。タップした順に番号（${SPEC[S.mode].label}の並び順）が付きます。もう一度タップで外れます。</p></div>
     <div class="row"><button class="btn sm" id="fill" type="button">先頭から${need}枚を選ぶ</button><button class="btn sm ghost" id="none" type="button">選択を全部外す</button></div></div>
-    <div id="cl"></div><div id="extra" style="margin-top:20px"></div></section>`);
+    <div id="extra" style="margin-bottom:20px"></div><div id="cl"></div></section>`);
   v.appendChild(p);
   const host = p.querySelector('#cl');
   if (!S.cands.length) { host.innerHTML = '<div class="empty">まだ絵がありません。Step 2 で画像を取り込んで切り出してください。</div>'; }
@@ -973,8 +1002,8 @@ function vClear(v) {
       <details class="ask" style="margin-top:12px" ${autoDone.length ? '' : 'hidden'}><summary style="cursor:pointer;font-weight:700">消し残しが多いときは：設定を変えて透過し直す</summary>${opts}<div class="row"><button class="btn" id="redo" type="button">この設定で ${autoDone.length}枚を透過し直す</button></div><p class="hint">「手で直す」で修正した絵は、上書きしないようにそのまま残します。</p></details>`)
       : `<div class="okbox">✓ 選んだ ${used.length}枚はすべて元から背景が透過されています。消し残しがあれば「手で直す」で消せます。</div>`) +
     `<div class="row" style="margin-block:14px 10px;justify-content:space-between"><p class="hint" style="margin:0">元から透過済み ${pre.length}枚・処理対象 ${todo.length}枚。左が元画像、右が透過後です。</p>
-      <div class="seg" role="group" aria-label="確認用の背景色">${[['chk', 'チェック'], ['dark', '黒'], ['green', '緑'], ['pink', 'ピンク']].map(([k, l]) => `<button type="button" data-bg="${k}" aria-pressed="${(S.tBg || 'dark') === k}">${l}</button>`).join('')}</div></div>
-    <div class="tgrid bg-${S.tBg || 'dark'}" id="tg"></div>`;
+      <div class="seg" role="group" aria-label="確認用の背景色">${[['chk', 'チェック'], ['dark', '黒'], ['green', '緑'], ['pink', 'ピンク']].map(([k, l]) => `<button type="button" data-bg="${k}" aria-pressed="${(S.tBg || 'chk') === k}">${l}</button>`).join('')}</div></div>
+    <div class="tgrid bg-${S.tBg || 'chk'}" id="tg"></div>`;
   const tg = body.querySelector('#tg');
   body.querySelectorAll('[data-bg]').forEach(b => b.onclick = () => { S.tBg = b.dataset.bg; render(); });
   [...todo, ...pre].forEach(cd => {
@@ -1033,7 +1062,7 @@ function openTouchUp(cd, mode = 'clear') {
   wx.drawImage(start, 0, 0);
   const base = mk(W, H); ctx2(base).drawImage(ER ? (cd.proc || raw) : raw, 0, 0); // what "なぞって戻す" paints back
   const undo = []; const snap = () => { undo.push(wx.getImageData(0, 0, W, H)); if (undo.length > 20) undo.shift(); };
-  let tool = 'erase', size = Math.max(6, Math.round(Math.max(W, H) / 30)), zoom = 1, bg = S.tBg || 'dark';
+  let tool = 'erase', size = Math.max(6, Math.round(Math.max(W, H) / 30)), zoom = 1, bg = S.tBg || 'chk';
   const pop = el(`<div class="overlay" id="tu"><div class="sheetpop tu" role="dialog" aria-modal="true" aria-label="手で直す">
     <div class="ph"><h2 style="font-size:17px">${ER ? '消しゴム' : '手で直す'}</h2><div class="row"><button class="btn sm ghost" id="tx" type="button">やめる</button><button class="btn sm primary" id="tok" type="button">これで決定</button></div></div>
     <div class="seg" role="group" aria-label="道具" id="tools">${[['erase', 'なぞって消す'], ['restore', 'なぞって戻す'], ['wand', 'タップで同じ色を消す'], ['pan', '動かす']].map(([k, l]) => `<button type="button" data-t="${k}">${l}</button>`).join('')}</div>
