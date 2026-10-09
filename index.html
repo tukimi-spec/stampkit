@@ -1,5 +1,5 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#f6ebe6">
+<meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#f7f2eb">
 <link rel="manifest" href="./site.webmanifest"><link rel="icon" href="./favicon.png" type="image/png"><link rel="apple-touch-icon" href="./apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="申請キット">
 </head><body><title>スタンプ申請キット</title>
@@ -21,11 +21,12 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 <style>
 /* Layout: one-column wizard — step rail on top, sticky tally, one working area per step, fixed bottom action bar */
 :root{
-  /* soft pink-beige, warm whites, dusty-rose accents; text stays near-black */
-  --bg:#f6ebe6; --surface:#fffaf8; --sunk:#f8efea; --ink:#1d1a1c; --muted:#7a6a6e; --line:#ead9d2;
-  --accent:#b35f7a; --accent-ink:#ffffff; --hi:#f3cdcb; --hi-ink:#1d1a1c; --ok:#4c8a6e; --warn:#a46f27; --bad:#c43f4e;
-  --rose:#d89aa8; --blush:#fbe4e4; --sand:#f3e3d3;
-  --chk1:#ffffff; --chk2:#eee3df; --talk:#a9b9c9;
+  /* light beige base; buttons and frames outlined in brown; white inside with black text */
+  --bg:#f7f2eb; --surface:#ffffff; --sunk:#fbf8f4; --ink:#1d1a1c; --muted:#76695f; --line:#e5d9cc;
+  --brown:#8a6a55; --brown-soft:#d8c6b5; --beige:#f1e7dc;
+  --accent:#8a6a55; --accent-ink:#ffffff; --hi:#eadbc9; --hi-ink:#1d1a1c; --ok:#4c8a6e; --warn:#a46f27; --bad:#c43f4e;
+  --rose:#c9ab93; --blush:#f4ebe1; --sand:#efe4d6;
+  --chk1:#ffffff; --chk2:#ece6df; --talk:#a9b9c9;
   --f-display:"Zen Maru Gothic","Zen Kaku Gothic New",system-ui,sans-serif;
   --f-body:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
   --f-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
@@ -245,28 +246,37 @@ button,select,input{font:inherit;color:inherit}
 @media (max-width:560px){ .top h1{font-size:22px} .ph h2{font-size:18px} .bar .btn{min-width:0;flex:1} .bar .msg{display:none} .cands{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))} }
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 
-/* ---- pink-beige theme details ---- */
+/* ---- beige theme: brown outlines, white insides ---- */
+html{background:var(--bg)!important;background-image:none!important}
 .top{padding-block:26px 14px}
 .top h1{font-size:27px;letter-spacing:.06em;display:flex;align-items:center;gap:10px}
-.top h1::before{content:"";width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,var(--rose),#e9b9a6);box-shadow:16px 0 0 -3px var(--hi)}
-.top h1::before{margin-right:10px}
-.panel{border-radius:20px;border-color:var(--line);box-shadow:0 10px 30px -18px rgba(150,96,104,.35)}
-.btn{border-radius:999px}
-.btn.primary{box-shadow:0 6px 16px -8px rgba(179,95,122,.7)}
-.tally{background:#2b2326;color:#fbf1ee;box-shadow:0 12px 26px -14px rgba(60,30,40,.55)}
+.top h1::before{content:"";width:12px;height:12px;border-radius:50%;background:var(--brown);box-shadow:16px 0 0 -3px var(--brown-soft);margin-right:10px}
+.panel{background:#fff;border:1.5px solid var(--brown);border-radius:20px;box-shadow:0 10px 26px -20px rgba(90,60,40,.45)}
+.btn,.btn.ghost,.btn.primary,.btn.hi,.drop .btn{background:#fff;color:var(--ink);border:1.5px solid var(--brown);border-radius:999px;box-shadow:none}
+.btn.primary,.btn.hi{border-width:2px;font-weight:700}
+.btn.danger,.btn.ghost.danger{color:var(--bad)}
+.btn:hover:not(:disabled){background:var(--beige)}
+.btn:disabled{opacity:.45}
+.rail button{border:1.5px solid var(--brown-soft);border-radius:999px;background:#fff}
+.rail button[aria-current="step"]{background:#fff;border:2px solid var(--brown);color:var(--ink)}
+.rail button[aria-current="step"] i{background:var(--brown);color:#fff;border-color:var(--brown)}
+.tally{background:#3a2d26;color:#fbf6f0;box-shadow:0 12px 26px -16px rgba(60,40,25,.6)}
 .tally .need .n{color:var(--hi-ink)}
-.rail button{border-radius:999px;background:color-mix(in srgb,var(--surface) 85%,transparent)}
-.rail button[aria-current="step"]{background:#2b2326;border-color:#2b2326;color:#fbf1ee}
 .count b,.need .n,.chips button,.stepper input,.rail button i{font-weight:700}
 .kind-card,.cand,.titem,.out{border-radius:16px}
-.kind-card[aria-pressed="true"]{background:var(--blush)}
-.chips button[aria-pressed="true"]{background:#2b2326;border-color:#2b2326;color:#fbf1ee}
-.seg button[aria-pressed="true"]{background:#2b2326;border-color:#2b2326;color:#fbf1ee}
-.bar{background:color-mix(in srgb,var(--surface) 88%,transparent)}
-#extra:not(:empty){background:linear-gradient(135deg,var(--blush),var(--sand));border:1px solid var(--line);border-radius:18px;padding:14px 16px}
-.resume,.ask{border-radius:16px}
-.toast{background:#2b2326;color:#fbf1ee;border-radius:999px}
-.drop{border-radius:18px}
+.kind-card{background:#fff;border:1.5px solid var(--brown-soft)}
+.kind-card[aria-pressed="true"]{background:#fff;border-color:var(--brown);box-shadow:0 0 0 2px var(--brown)}
+.chips button{background:#fff;border:1.5px solid var(--brown-soft)}
+.chips button[aria-pressed="true"]{background:var(--beige);border:2px solid var(--brown);color:var(--ink)}
+.chips button[aria-pressed="true"] small{color:var(--muted);opacity:1}
+.seg button{background:#fff;border:1.5px solid var(--brown-soft);color:var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--beige);border:2px solid var(--brown);color:var(--ink)}
+.bar{background:color-mix(in srgb,#fff 92%,transparent);border-top:1.5px solid var(--brown-soft)}
+#extra:not(:empty){background:#fff;border:1.5px solid var(--brown);border-radius:18px;padding:14px 16px}
+.resume,.ask,.okbox{border-radius:16px}
+.ask{background:#fff;border:1.5px solid var(--brown)}
+.toast{background:#3a2d26;color:#fbf6f0;border-radius:999px}
+.drop{border-radius:18px;border-color:var(--brown-soft);background:var(--sunk)}
 </style>
 
 <div class="wrap">
