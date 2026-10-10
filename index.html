@@ -267,6 +267,54 @@ button,select,input{font:inherit;color:inherit}
 .out.ghost{position:fixed;z-index:90;pointer-events:none;box-shadow:0 14px 30px -10px rgba(60,40,25,.5);transform:rotate(-2deg)}
 body.sorting{user-select:none;-webkit-user-select:none}
 @media (max-width:560px){.sheet{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.out .img{min-height:110px;padding:6px}.out footer{font-size:11px;padding:6px 8px}.mvrow{flex-wrap:wrap}.grip{flex-basis:100%}}
+.xbtn{width:36px;height:36px;flex:none;border-radius:50%;border:1.5px solid var(--brown);background:#fff;color:var(--ink);font-size:16px;line-height:1;display:grid;place-items:center;cursor:pointer;padding:0}
+.xbtn:hover{background:var(--beige)}
+.titem{position:relative}
+.xbtn.corner{position:absolute;top:-10px;right:-10px;width:30px;height:30px;font-size:13px;z-index:2;box-shadow:0 2px 6px rgba(60,40,25,.2)}
+.sheetpop .ph{flex-wrap:nowrap;align-items:center}
+.tufoot{position:sticky;bottom:-16px;background:#fff;padding:10px 0 4px;margin-top:6px;border-top:1px solid var(--line);display:flex;justify-content:flex-end}
+.tufoot .btn{min-width:180px}
+@media (max-width:560px){.tufoot .btn{width:100%}}
+/* compact Step 2 */
+.ph.tight{margin-bottom:8px}
+.lead .tips{display:inline;margin-left:4px}
+.lead .tips summary{display:inline;cursor:pointer;color:var(--brown);text-decoration:underline;text-underline-offset:3px}
+.lead .tips[open]{display:block;margin-top:4px}
+.droprow{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.droprow .drop:not(.compact){flex:1 1 100%;padding:14px 12px;display:grid;gap:4px;justify-items:center}
+.drop.compact{flex:none;padding:0;border:0;background:none}
+.droprow .sheets{margin:0;padding:4px 2px;flex:1 1 140px}
+.droprow .sheets img{width:44px;height:44px}
+.toolbar{margin-block:10px 8px}
+.more{position:relative}
+.more summary{list-style:none}
+.more summary::-webkit-details-marker{display:none}
+.morebox{position:absolute;z-index:10;top:110%;left:0;background:#fff;border:1.5px solid var(--brown);border-radius:14px;padding:8px;display:grid;gap:6px;min-width:170px;box-shadow:0 10px 24px -12px rgba(60,40,25,.4)}
+.out.moved{outline:3px solid var(--brown);outline-offset:2px;transition:outline-color .8s}
+@media (max-width:560px){
+  .panel{padding:14px 12px}
+  .stagewrap{margin-inline:calc(50% - 50vw);width:100vw;border-radius:0;border-inline:0;max-height:82vh}
+  .gridset input{width:44px}
+}
+@media (pointer:coarse){
+  .gl.v{width:40px;margin-left:-20px}.gl.v::after{left:19px}
+  .gl.h{height:40px;margin-top:-20px}.gl.h::after{top:19px}
+  .gl.v i{left:8px;width:24px;height:52px;margin-top:-26px}
+  .gl.h i{top:8px;height:24px;width:52px;margin-left:-26px}
+  .gl.all{width:44px;height:44px;font-size:22px}
+  .box .h{width:30px;height:30px;margin:-15px 0 0 -15px}
+}
+@media (max-width:560px){
+  .top{padding-block:10px 4px}.top h1{font-size:19px;gap:6px}.top h1::before{width:9px;height:9px;box-shadow:12px 0 0 -2px var(--brown-soft);margin-right:8px}.top p{display:none}
+  .rail{gap:4px}.rail button{padding:4px 10px 4px 5px;font-size:12px}.rail button i{width:20px;height:20px;font-size:11px}
+  .tally{margin-top:6px;padding:6px 12px 8px;gap:0 10px;border-radius:12px}.tally .kind{font-size:11px}.count b{font-size:21px}.count span{font-size:13px}
+  .need{font-size:12.5px}.need .n{font-size:14px;padding:0 6px}.meter{flex-basis:100%;height:5px;margin-top:4px}
+  .panel{margin-top:10px}.ph h2{font-size:18px}.eyebrow{font-size:10px}
+  .droprow{gap:6px}.droprow .sheets{flex:1 1 0;min-width:0}.droprow .sheets img{width:38px;height:38px}
+  .tgrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 10px}
+  .titem{padding:6px;gap:4px}.titem .lbl{font-size:9.5px}.titem .row{gap:4px!important}.titem .btn{padding:4px 10px;font-size:12px;min-height:0}.titem .check{font-size:12px}
+}
+@media (max-width:560px){.toolbar{gap:6px}.toolbar .btn,.droprow .btn{padding:5px 11px;font-size:12.5px;min-height:0}.gridset input{height:32px;padding:0 4px}.gridset{gap:4px}}
 /* ---- beige theme: brown outlines, white insides ---- */
 html{background:var(--bg)!important;background-image:none!important}
 .top{padding-block:26px 14px}
@@ -770,11 +818,17 @@ function renderBar() {
   else if (S.step === 5) msg.textContent = 'ZIPを申請画面でアップロードします';
   else msg.textContent = '';
 }
+let lastStep = -1, holdT = 0;
 function render() {
+  // stay where the person was working: re-rendering the same step keeps the scroll position
+  const same = S.step === lastStep, y = window.scrollY, v = $('view');
+  if (same) { v.style.minHeight = v.offsetHeight + 'px'; clearTimeout(holdT); }
   renderRail(); renderTally(); renderBar();
-  const v = $('view'); v.innerHTML = '';
+  v.innerHTML = '';
   if (pendingResume) v.appendChild(resumeBox());
   [vChoose, vCut, vPick, vClear, vDup, vReview][S.step](v);
+  if (same) { window.scrollTo(0, y); requestAnimationFrame(() => window.scrollTo(0, y)); holdT = setTimeout(() => { v.style.minHeight = ''; }, 700); }
+  lastStep = S.step;
   scheduleSave();
   $('specNote').innerHTML = SPEC[S.mode].note + ' 規格は2026年10月時点の <a href="https://creator.line.me/ja/guideline/" target="_blank" rel="noopener">LINE Creators Market ガイドライン</a> を元にしています。画像はこのブラウザの中だけで処理され、どこにも送信されません。作業内容はこの端末のブラウザに自動保存され、次に開いたときに続きから再開できます（別の端末とは共有されません）。<span id="saved"></span>';
 }
@@ -829,11 +883,12 @@ async function addFiles(files) {
 }
 function addSheet(c, name) { const sh = { id: uid++, name, src: c, thumb: thumbURL(c, 120), boxes: [], rows: 4, cols: 4, cut: false }; sh.boxes = detect(c, 20); S.sheets.push(sh); S.active = sh.id; S.selBox = null; return sh; }
 function vCut(v) {
-  const p = el(`<section class="panel"><div class="ph"><div><span class="eyebrow">Step 2</span><h2>画像を取り込んで、切り取り枠を決める</h2>
-    <p class="lead">1枚に何体も並んだシートでもOK。取り込むと自動で枠を作ります。<b>枠はドラッグで移動</b>、丸いつまみで大きさを変更、<b>空いた所をなぞると新しい枠</b>、× で削除。使わないキャラの枠は消してください。</p></div></div>
-    <div class="drop" id="drop"><strong>画像をドロップ、またはタップして選択</strong><span class="hint">PNG / JPG / WebP / HEIC・複数枚まとめてOK</span><br><span class="btn primary pick">画像を選ぶ</span><input type="file" id="file" accept="image/*,.png,.jpg,.jpeg,.webp,.heic,.heif" multiple aria-label="画像を選ぶ"></div>
-    <div class="row" style="margin-top:8px"><button class="btn sm ghost" id="sample" type="button">サンプル画像で試す</button></div>
-    <div class="sheets" id="sheets"></div><div id="editor"></div><div id="cl"></div></section>`);
+  const has = S.sheets.length > 0;
+  const p = el(`<section class="panel"><div class="ph tight"><div><span class="eyebrow">Step 2</span><h2>取り込み・切り取り枠</h2>
+    <div class="lead">取り込むと自動で枠ができます。使わない枠は × で消してください。<details class="tips"><summary>操作のヒント</summary>枠はドラッグで移動、丸いつまみで大きさを変更、空いた所をなぞると新しい枠。「グリッドで分割」すると線ごとまとめて動かせます。</details></div></div></div>
+    <div class="droprow"><div class="drop ${has ? 'compact' : ''}" id="drop">${has ? '<span class="btn sm pick">＋ 画像を追加</span>' : '<strong>画像をドロップ、またはタップして選択</strong><span class="hint">PNG / JPG / WebP / HEIC・複数枚OK</span><span class="btn primary pick">画像を選ぶ</span>'}<input type="file" id="file" accept="image/*,.png,.jpg,.jpeg,.webp,.heic,.heif" multiple aria-label="画像を選ぶ"></div>
+      <button class="btn sm ghost" id="sample" type="button">サンプルで試す</button><div class="sheets" id="sheets"></div></div>
+    <div id="editor"></div><div id="cl"></div></section>`);
   v.appendChild(p);
   const drop = p.querySelector('#drop');
   p.querySelector('#file').onchange = e => { const fl = [...e.target.files]; e.target.value = ''; addFiles(fl); };
@@ -862,9 +917,8 @@ function editor(host, sh) {
       <span class="gridset">グリッド <input id="gr" type="number" min="1" max="12" value="${sh.rows}" aria-label="行数">行×<input id="gc" type="number" min="1" max="12" value="${sh.cols}" aria-label="列数">列 <button class="btn sm" id="grid" type="button">で分割</button></span>
       <button class="btn sm" id="add" type="button">＋ 枠を追加</button>
       <button class="btn sm" id="zoom" type="button">${S.zoom > 1 ? '等倍で表示' : '拡大して編集'}</button>
-      <button class="btn sm ghost danger" id="clr" type="button">枠を全部消す</button>
-      <button class="btn sm ghost danger" id="rm" type="button">このシートを外す</button></div>
-    ${sh.grid ? `<div class="row" style="margin:-2px 0 8px;gap:8px"><span class="hint">動かし方</span><div class="seg" role="group" aria-label="動かし方"><button type="button" data-cm="line" aria-pressed="${S.cutMode !== 'box'}">グリッド線ごと</button><button type="button" data-cm="box" aria-pressed="${S.cutMode === 'box'}">枠を1つずつ</button></div><span class="hint">${S.cutMode === 'box' ? '枠をドラッグで移動、丸いつまみで大きさを変更できます。' : '線をドラッグすると、その列・行の枠がまとめて動きます。左上の ✥ で全体を移動。'}</span></div>` : ''}
+      <details class="more"><summary class="btn sm ghost">その他</summary><div class="morebox"><button class="btn sm ghost danger" id="clr" type="button">枠を全部消す</button><button class="btn sm ghost danger" id="rm" type="button">このシートを外す</button></div></details></div>
+    ${sh.grid ? `<div class="row" style="margin:-2px 0 8px;gap:8px"><span class="hint">動かし方</span><div class="seg" role="group" aria-label="動かし方"><button type="button" data-cm="line" aria-pressed="${S.cutMode !== 'box'}">グリッド線ごと</button><button type="button" data-cm="box" aria-pressed="${S.cutMode === 'box'}">枠を1つずつ</button></div><span class="hint">${S.cutMode === 'box' ? '枠ごとに移動・大きさ変更' : '線のつまみで列・行ごと、✥で全体を移動'}</span></div>` : ''}
     <div class="stagewrap ${S.zoom > 1 ? 'z' : ''}"><div class="stage chk ${sh.grid && S.cutMode !== 'box' ? 'linemode' : ''}" id="stage" style="width:${S.zoom * 100}%"><canvas id="cv"></canvas></div></div>
     ${S.zoom > 1 ? '<p class="hint" style="margin-top:6px">拡大中は、枠の外をスワイプすると画像を動かせます。新しい枠は「＋ 枠を追加」で作れます。</p>' : ''}
     <div class="row" style="margin-top:12px;justify-content:space-between"><span class="hint" id="info"></span><button class="btn primary" id="cut" type="button"></button></div></div>`);
@@ -885,7 +939,7 @@ function editor(host, sh) {
   const draw = () => {
     stage.querySelectorAll('.box').forEach(b => b.remove());
     sh.boxes.forEach((b, i) => {
-      const d = el(`<div class="box ${S.selBox === i ? 'sel' : ''}" data-i="${i}"><span class="no">${i + 1}</span>${['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map(h => `<span class="h" data-h="${h}"></span>`).join('')}<button class="del" type="button" aria-label="枠${i + 1}を削除">×</button></div>`);
+      const d = el(`<div class="box ${S.selBox === i ? 'sel' : ''}" data-i="${i}" aria-label="枠${i + 1}">${['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map(h => `<span class="h" data-h="${h}"></span>`).join('')}<button class="del" type="button" aria-label="枠${i + 1}を削除">×</button></div>`);
       place(d, b);
       const del = d.querySelector('.del'); del.addEventListener('pointerdown', ev => ev.stopPropagation()); del.onclick = ev => { ev.stopPropagation(); sh.boxes.splice(i, 1); S.selBox = null; draw(); commit(); };
       stage.appendChild(d);
@@ -1033,7 +1087,7 @@ function assignTheme(name, id) {
 }
 function openPicker(title, list, onPick, onClear) {
   const pop = $('pop');
-  pop.innerHTML = `<div class="overlay" id="ov"><div class="sheetpop" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="ph"><h2 style="font-size:17px">${esc(title)}</h2><div class="row">${onClear ? '<button class="btn sm ghost danger" id="pc" type="button">割り当てを外す</button>' : ''}<button class="btn sm" id="px" type="button">閉じる</button></div></div><div class="cands" id="pl"></div></div></div>`;
+  pop.innerHTML = `<div class="overlay" id="ov"><div class="sheetpop" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="ph"><h2 style="font-size:17px">${esc(title)}</h2><div class="row">${onClear ? '<button class="btn sm ghost danger" id="pc" type="button">割り当てを外す</button>' : ''}<button class="xbtn" id="px" type="button" aria-label="閉じる">✕</button></div></div><div class="cands" id="pl"></div></div></div>`;
   const close = () => pop.innerHTML = '';
   list.forEach(cd => { const b = el(`<button type="button" class="cand"><div class="im chk"><img alt="" src="${cd.url}"></div></button>`); b.onclick = () => { close(); onPick(cd.id); }; pop.querySelector('#pl').appendChild(b); });
   pop.querySelector('#px').onclick = close; pop.querySelector('#ov').onclick = e => { if (e.target.id === 'ov') close(); };
@@ -1077,11 +1131,11 @@ function vClear(v) {
   [...todo, ...pre].forEach(cd => {
     const isPre = cd.transparent, prev = cd.proc ? cd.url : isPre ? cd.url : removeBgPreview(cd), raw = cd.rawUrl || cd.url;
     const state = isPre ? (cd.proc ? '手で修正済み' : '元から透過') : cd.proc ? (cd.manual ? '手で修正済み' : '透過済み') : '透過後（予想）';
-    const it = el(`<div class="titem ${tSel.has(cd.id) || cd.proc ? 'on' : ''}"><div class="pair"><div class="chk"><img alt="元画像" src="${raw}"></div><div class="tv"><img alt="透過後" src="${prev}"></div></div><div class="lbl"><span>元</span><span>${state}</span></div>
-      <div class="row" style="gap:6px">${isPre ? '' : cd.proc ? '<button class="btn sm ghost" type="button" data-undo>元に戻す</button>' : `<label class="check"><input type="checkbox" ${tSel.has(cd.id) ? 'checked' : ''}> 透過する ${opaqueOnly(cd) ? '<span class="pill warn">サムネイル用</span>' : ''}</label>`}
+    const it = el(`<div class="titem ${tSel.has(cd.id) || cd.proc ? 'on' : ''}">${!isPre && cd.proc ? '<button class="xbtn corner" type="button" data-undo aria-label="透過を取り消して元の絵に戻す" title="透過を取り消す">✕</button>' : ''}<div class="pair"><div class="chk"><img alt="元画像" src="${raw}"></div><div class="tv"><img alt="透過後" src="${prev}"></div></div><div class="lbl"><span>元</span><span>${state}</span></div>
+      <div class="row" style="gap:6px">${isPre || cd.proc ? '' : `<label class="check"><input type="checkbox" ${tSel.has(cd.id) ? 'checked' : ''}> 透過する ${opaqueOnly(cd) ? '<span class="pill warn">サムネイル用</span>' : ''}</label>`}
       <button class="btn sm" type="button" data-fix>手で直す</button></div></div>`);
     const cb = it.querySelector('input'); if (cb) cb.onchange = e => { e.target.checked ? tSel.add(cd.id) : tSel.delete(cd.id); it.classList.toggle('on', e.target.checked); };
-    const u = it.querySelector('[data-undo]'); if (u) u.onclick = () => { setProc(cd, null); tSel.add(cd.id); render(); };
+    const u = it.querySelector('[data-undo]'); if (u) u.onclick = () => { if (!confirm('この絵の透過を取り消して、元の絵に戻しますか？')) return; setProc(cd, null); tSel.add(cd.id); render(); };
     it.querySelector('[data-fix]').onclick = () => openTouchUp(cd);
     tg.appendChild(it);
   });
@@ -1132,13 +1186,14 @@ function openTouchUp(cd, mode = 'clear') {
   const undo = []; const snap = () => { undo.push(wx.getImageData(0, 0, W, H)); if (undo.length > 20) undo.shift(); };
   let tool = 'erase', size = Math.max(6, Math.round(Math.max(W, H) / 30)), zoom = 1, bg = S.tBg || 'chk';
   const pop = el(`<div class="overlay" id="tu"><div class="sheetpop tu" role="dialog" aria-modal="true" aria-label="手で直す">
-    <div class="ph"><h2 style="font-size:17px">${ER ? '消しゴム' : '手で直す'}</h2><div class="row"><button class="btn sm ghost" id="tx" type="button">やめる</button><button class="btn sm primary" id="tok" type="button">これで決定</button></div></div>
+    <div class="ph"><h2 style="font-size:17px">${ER ? '消しゴム' : '手で直す'}</h2><button class="xbtn" id="tx" type="button" aria-label="保存せずに閉じる" title="保存せずに閉じる">✕</button></div>
     <div class="seg" role="group" aria-label="道具" id="tools">${[['erase', 'なぞって消す'], ['restore', 'なぞって戻す'], ['wand', 'タップで同じ色を消す'], ['pan', '動かす']].map(([k, l]) => `<button type="button" data-t="${k}">${l}</button>`).join('')}</div>
     <div class="tuwrap" id="tw"><div class="tustage" id="tst"><canvas id="tc"></canvas><div class="tucur" id="tcur" hidden></div></div></div>
     <div class="row" style="gap:8px 12px;margin-top:8px"><label class="field" style="flex:1;min-width:150px" id="szw">ブラシの太さ <output id="szo">${size}</output><input type="range" id="sz" min="2" max="${Math.max(40, Math.round(Math.max(W, H) / 6))}" value="${size}"></label>
       <button class="btn sm" id="tz" type="button">拡大</button><button class="btn sm" id="tun" type="button">1つ戻す</button>${ER ? '<button class="btn sm ghost" id="tbase" type="button">最初の状態に戻す</button>' : '<button class="btn sm ghost" id="traw" type="button">元の絵からやり直す</button><button class="btn sm ghost" id="tre" type="button">自動透過をかけ直す</button>'}</div>
     <div class="row" style="gap:8px;margin-top:6px"><span class="hint">背景色</span><div class="seg" role="group" aria-label="背景色">${[['chk', 'チェック'], ['dark', '黒'], ['green', '緑'], ['pink', 'ピンク']].map(([k, l]) => `<button type="button" data-b="${k}">${l}</button>`).join('')}</div></div>
-    <p class="hint" id="thint"></p></div></div>`);
+    <p class="hint" id="thint"></p>
+    <div class="tufoot"><button class="btn primary" id="tok" type="button">これで決定</button></div></div></div>`);
   document.body.appendChild(pop);
   const cv = pop.querySelector('#tc'); cv.width = W; cv.height = H; const cx = ctx2(cv);
   const stage = pop.querySelector('#tst'), wrap = pop.querySelector('#tw'), cur = pop.querySelector('#tcur');
@@ -1189,7 +1244,7 @@ function openTouchUp(cd, mode = 'clear') {
   if (ER) pop.querySelector('#tbase').onclick = () => reset(base);
   else { pop.querySelector('#traw').onclick = () => reset(raw); pop.querySelector('#tre').onclick = () => reset(cd.transparent ? raw : removeBg(raw, S.tol)); }
   const close = () => pop.remove();
-  pop.querySelector('#tx').onclick = close;
+  pop.querySelector('#tx').onclick = () => { if (undo.length && !confirm('編集した内容を保存せずに閉じますか？')) return; close(); };
   pop.querySelector('#tok').onclick = () => { const out = mk(W, H); ctx2(out).drawImage(work, 0, 0);
     if (ER) { applyErase(cd, base, out); close(); toast('消しゴムの内容を反映しました'); }
     else { setProc(cd, out, true); tSel.delete(cd.id); close(); toast('修正した絵を使います'); }
@@ -1324,8 +1379,11 @@ function vReview(v) {
 // ---- change the order of stickers / emoji in the final list ----
 function movePick(from, to) {
   const n = Math.min(S.count[S.mode], S.picked.length); if (to < 0 || to >= n || from === to) return;
+  const before = document.querySelector(`.out[data-idx="${from}"]`), top0 = before ? before.getBoundingClientRect().top : null;
   const [id] = S.picked.splice(from, 1); S.picked.splice(to, 0, id);
   toast(`${from + 1}番 → ${to + 1}番に移動しました`); render();
+  const after = document.querySelector(`.out[data-idx="${to}"]`);
+  if (after && top0 != null) { const fix = () => window.scrollBy(0, after.getBoundingClientRect().top - top0); fix(); requestAnimationFrame(fix); after.classList.add('moved'); setTimeout(() => after.classList.remove('moved'), 1200); }
 }
 function startGrip(grip, card, list) {
   grip.addEventListener('pointerdown', ev => {
