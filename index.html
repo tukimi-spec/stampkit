@@ -315,6 +315,13 @@ body.sorting{user-select:none;-webkit-user-select:none}
   .titem{padding:6px;gap:4px}.titem .lbl{font-size:9.5px}.titem .row{gap:4px!important}.titem .btn{padding:4px 10px;font-size:12px;min-height:0}.titem .check{font-size:12px}
 }
 @media (max-width:560px){.toolbar{gap:6px}.toolbar .btn,.droprow .btn{padding:5px 11px;font-size:12.5px;min-height:0}.gridset input{height:32px;padding:0 4px}.gridset{gap:4px}}
+/* PC: explanation on the left, import area on the right (no empty space beside the text) */
+@media (min-width:760px){
+  .ph.tight{display:grid;grid-template-columns:minmax(0,1fr) minmax(340px,48%);align-items:center;gap:10px 20px}
+  .ph.tight .droprow .drop:not(.compact){padding:10px 12px}
+  .ph.tight .droprow{justify-content:flex-start}
+}
+@media (max-width:759px){.ph.tight{display:block}.ph.tight .droprow{margin-top:10px}}
 /* ---- beige theme: brown outlines, white insides ---- */
 html{background:var(--bg)!important;background-image:none!important}
 .top{padding-block:26px 14px}
@@ -885,9 +892,9 @@ function addSheet(c, name) { const sh = { id: uid++, name, src: c, thumb: thumbU
 function vCut(v) {
   const has = S.sheets.length > 0;
   const p = el(`<section class="panel"><div class="ph tight"><div><span class="eyebrow">Step 2</span><h2>取り込み・切り取り枠</h2>
-    <div class="lead">取り込むと自動で枠ができます。使わない枠は × で消してください。<details class="tips"><summary>操作のヒント</summary>枠はドラッグで移動、丸いつまみで大きさを変更、空いた所をなぞると新しい枠。「グリッドで分割」すると線ごとまとめて動かせます。</details></div></div></div>
+    <div class="lead">取り込むと自動で枠ができます。使わない枠は × で消してください。<details class="tips"><summary>操作のヒント</summary>枠はドラッグで移動、丸いつまみで大きさを変更、空いた所をなぞると新しい枠。「グリッドで分割」すると線ごとまとめて動かせます。</details></div></div>
     <div class="droprow"><div class="drop ${has ? 'compact' : ''}" id="drop">${has ? '<span class="btn sm pick">＋ 画像を追加</span>' : '<strong>画像をドロップ、またはタップして選択</strong><span class="hint">PNG / JPG / WebP / HEIC・複数枚OK</span><span class="btn primary pick">画像を選ぶ</span>'}<input type="file" id="file" accept="image/*,.png,.jpg,.jpeg,.webp,.heic,.heif" multiple aria-label="画像を選ぶ"></div>
-      <button class="btn sm ghost" id="sample" type="button">サンプルで試す</button><div class="sheets" id="sheets"></div></div>
+      <button class="btn sm ghost" id="sample" type="button">サンプルで試す</button><div class="sheets" id="sheets"></div></div></div>
     <div id="editor"></div><div id="cl"></div></section>`);
   v.appendChild(p);
   const drop = p.querySelector('#drop');
