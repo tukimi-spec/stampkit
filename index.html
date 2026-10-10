@@ -342,22 +342,22 @@ const SPEC = {
   },
   theme: {
     label: '着せかえ', unit: '枚', zipLimitMB: null, zipName: 'theme', transparent: false,
-    blurb: 'LINEアプリ全体のデザイン', spec: '全60枚（必須57＋任意3）',
+    blurb: 'LINEアプリ全体のデザイン', spec: '全62枚（必須59＋任意3）',
     groups: (opt) => {
-      // menu names per the detail guideline; file names are editable in Step 3 (要確認)
-      const menu26 = ['ホーム', 'トーク', 'ショッピング', 'ニュース', 'アプリ', 'メニュー6', 'メニュー7', 'メニュー8', 'メニュー9'];
-      const menuOld = ['ホーム', 'トーク', 'VOOM', 'TODAY', 'ウォレット', 'メニュー6', 'メニュー7', 'メニュー8'];
-      const menu = (p, names, w, h, margin) => [
-        ...names.map((n, i) => ({ name: `${p}_${String(i + 1).padStart(2, '0')}.png`, w, h, margin, label: `${n} OFF`, menu: true })),
-        ...names.map((n, i) => ({ name: `${p}_10${'abcdefghi'[i]}.png`, w, h, margin, label: `${n} ON`, menu: true })) ];
+      // menu buttons exactly as the LINE Creators Market upload screen names them (checked against a real submission, 2026-10)
+      // i_XX.png = iOS 26未満 and Android (shared, 128×150) / i_XX_g.png = iOS 26以上 (80×56)
+      const BTN = [['トーク', '03', '04'], ['通話', '07', '08'], ['ニュース', '25', '26'], ['ウォレット', '27', '28'], ['ホーム', '29', '30'], ['TODAY', '31', '32'], ['VOOM', '33', '34'], ['ショッピング', '35', '36'], ['アプリ', '37', '38']];
+      const menu = (suffix, w, h, margin) => BTN.flatMap(([n, off, on]) => [
+        { name: `i_${off}${suffix}.png`, w, h, margin, label: `${n} OFF`, menu: true },
+        { name: `i_${on}${suffix}.png`, w, h, margin, label: `${n} ON`, menu: true } ]);
       const pass = (p, s) => Array.from({ length: 8 }, (_, i) => ({ name: `${p}_${12 + i}.png`, w: s, h: s, margin: 8, label: `パスコード${Math.floor(i / 2) + 1} ${i % 2 ? 'ON' : 'OFF'}`, pair: true }));
       const g = [
         { title: 'A サムネイル', note: '3枚・背景は透過不可（塗りつぶし色で埋めます）', slots: [
           { name: 'ios_thumbnail.png', w: 200, h: 284, opaque: true, fit: 'cover', label: 'iOS' },
           { name: 'android_thumbnail.png', w: 136, h: 202, opaque: true, fit: 'cover', label: 'Android' },
           { name: 'store_thumbnail.png', w: 198, h: 278, opaque: true, fit: 'cover', label: 'LINE STORE' } ] },
-        { title: 'B メニューボタン（iOS 26以降）', note: '80×56px・OFF/ON 各9＝18枚・白背景と黒背景の両方で見えるデザインに', slots: menu('i', menu26, 80, 56, 2) },
-        { title: 'B メニューボタン（iOS 26未満・Android）', note: '128×150px・OFF/ON 各8＝16枚・周りに10px程度の余白', slots: menu('a', menuOld, 128, 150, 10) },
+        { title: 'B メニューボタン（iOS 26未満・Android 共通）', note: '128×150px・9種類×OFF/ON＝18枚（i_03〜i_38）・周りに10px程度の余白', slots: menu('', 128, 150, 10) },
+        { title: 'B メニューボタン（iOS 26以上）', note: '80×56px・9種類×OFF/ON＝18枚（i_03_g〜i_38_g）・白背景と黒背景の両方で見えるデザインに', slots: menu('_g', 80, 56, 2) },
         { title: 'D パスコード', note: 'iOS 120×120 / Android 116×116・各8＝16枚', slots: [...pass('i', 120), ...pass('a', 116)] },
         { title: 'E プロフィール', note: '4枚・自動で丸く切り抜かれますが、タップすると四隅まで表示されます', slots: [
           { name: 'i_20.png', w: 240, h: 240, fit: 'cover', opaque: true, label: '個人 iOS', pair: true }, { name: 'i_21.png', w: 240, h: 240, fit: 'cover', opaque: true, label: 'グループ iOS', pair: true },
@@ -369,7 +369,7 @@ const SPEC = {
         { name: 'a_22.png', w: 1300, h: 1300, fit: 'cover', optional: true, maxSize: true, label: 'トーク背景 Android', pair: true } ] });
       return g;
     },
-    note: '着せかえ（全60枚）：A サムネイル3枚（iOS 200×284 / Android 136×202 / STORE 198×278・非透過）、B メニューボタン34枚（iOS 26以降 80×56 ×18、iOS 26未満・Android 128×150 ×16）、C メニュー背景 1472×150（任意）、D パスコード16枚（iOS 120×120 / Android 116×116）、E プロフィール4枚（iOS 240×240 / Android 247×247）、F トーク背景2枚（iOS 最大1482×1334 / Android 最大1300×1300・1MB以下・任意）。メニューボタンのファイル名は Step 3 で確認・変更できます。'
+    note: '着せかえ（全62枚）：A サムネイル3枚（iOS 200×284 / Android 136×202 / STORE 198×278・非透過）、B メニューボタン36枚（iOS 26未満・Android共通 i_03〜i_38 128×150 ×18、iOS 26以上 i_03_g〜i_38_g 80×56 ×18）、C メニュー背景 i_11 1472×150（任意）、D パスコード16枚（iOS 120×120 / Android 116×116）、E プロフィール4枚（iOS 240×240 / Android 247×247）、F トーク背景 i_22 1482×1334・a_22 1300×1300（任意・1MB以下）。ファイル名はLINE Creators Marketの申請画面の名前に合わせています。',
   },
 };
 const STEPS = ['種類と個数', '取り込み・カット', '使う絵を選ぶ', '透過チェック', '重複チェック', '確認・書き出し'];
@@ -795,8 +795,8 @@ function vChoose(v) {
   }
   const cs = p.querySelector('#counts');
   if (S.mode === 'theme') {
-    cs.innerHTML = `<h3>着せかえの画像セット（全60枚）</h3><p class="hint">着せかえは枚数が決まっています。サムネイル3・メニューボタン34・パスコード16・プロフィール4の必須57枚に、任意のメニュー背景1・トーク背景2を加えた全60枚です。</p>
-      <label class="check"><input type="checkbox" id="opt" ${S.themeOpt ? 'checked' : ''}> 任意の3枚（メニュー背景・トーク背景）も含めて60枚で作る</label>`;
+    cs.innerHTML = `<h3>着せかえの画像セット（全62枚）</h3><p class="hint">着せかえは枚数が決まっています。サムネイル3・メニューボタン36（iOS 26未満・Android共通18＋iOS 26以上18）・パスコード16・プロフィール4の必須59枚に、任意のメニュー背景1・トーク背景2を加えた全62枚です。</p>
+      <label class="check"><input type="checkbox" id="opt" ${S.themeOpt ? 'checked' : ''}> 任意の3枚（メニュー背景・トーク背景）も含めて62枚で作る</label>`;
     cs.querySelector('#opt').onchange = e => S.themeOpt = e.target.checked;
   } else {
     const sp = SPEC[S.mode];
@@ -1005,7 +1005,7 @@ function vPick(v) {
 }
 function vPickTheme(v) {
   const p = el(`<section class="panel"><div class="ph"><div><span class="eyebrow">Step 3</span><h2>着せかえの各画像に絵を割り当てる</h2><p class="lead">枠をタップして、使う絵を選んでください。赤い点線の枠がまだ足りない画像です。</p></div>
-    <label class="check"><input type="checkbox" id="mir" ${S.mirror ? 'checked' : ''}> iOSとAndroidに同じ絵を使う</label></div><div id="gs"></div></section>`);
+    <label class="check"><input type="checkbox" id="mir" ${S.mirror ? 'checked' : ''}> iOSとAndroid、iOS 26用にも同じ絵を使う</label></div><div id="gs"></div></section>`);
   v.appendChild(p); p.querySelector('#mir').onchange = e => S.mirror = e.target.checked;
   const gs = p.querySelector('#gs');
   SPEC.theme.groups(S.themeOpt).forEach(g => {
@@ -1020,7 +1020,7 @@ function vPickTheme(v) {
     gs.appendChild(sec);
   });
   // file names (check against the official guideline before submitting)
-  const fn = el(`<details class="fn"><summary>ファイル名を確認・変更する（申請前に公式ガイドラインと照合してください）</summary><p class="hint" style="margin-top:6px">メニューボタンは iOS 26 対応で仕様が更新されています。ガイドラインのファイル名と違う場合は、ここで書き換えるとZIPのファイル名に反映されます。</p><div class="fgrid"></div><div class="row" style="margin-top:10px"><button class="btn sm ghost" type="button" id="fnr">初期値に戻す</button></div></details>`);
+  const fn = el(`<details class="fn"><summary>ファイル名を確認する（通常は変更不要）</summary><p class="hint" style="margin-top:6px">ファイル名は LINE Creators Market の申請画面（2026年10月時点）に合わせてあります。今後LINE側の名前が変わった場合だけ、ここで書き換えるとZIPのファイル名に反映されます。</p><div class="fgrid"></div><div class="row" style="margin-top:10px"><button class="btn sm ghost" type="button" id="fnr">初期値に戻す</button></div></details>`);
   themeSlots().forEach(sl => { const l = el(`<label><span>${esc(sl.label || '')}（${sl.w}×${sl.h}）</span><input type="text" value="${esc(fname(sl))}" aria-label="${esc(sl.label || sl.name)}のファイル名" spellcheck="false"></label>`);
     l.querySelector('input').onchange = e => { let v = e.target.value.trim().replace(/[\\/:*?"<>|]/g, ''); if (v && !/\.png$/i.test(v)) v += '.png'; if (!v || v === sl.name) delete S.fileNames[sl.name]; else S.fileNames[sl.name] = v; e.target.value = fname(sl); renderTally(); };
     fn.querySelector('.fgrid').appendChild(l); });
@@ -1029,7 +1029,7 @@ function vPickTheme(v) {
 }
 function assignTheme(name, id) {
   S.themeAssign[name] = id;
-  if (S.mirror) { const twin = name.startsWith('i_') ? 'a_' + name.slice(2) : name.startsWith('a_') ? 'i_' + name.slice(2) : null; if (twin && themeSlots().some(s => s.name === twin) && !S.themeAssign[twin]) S.themeAssign[twin] = id; }
+  if (S.mirror) { const twin = twinOf(name); if (twin && themeSlots().some(s => s.name === twin) && !S.themeAssign[twin]) S.themeAssign[twin] = id; }
 }
 function openPicker(title, list, onPick, onClear) {
   const pop = $('pop');
@@ -1215,7 +1215,8 @@ const normWord = (w) => (w || '').normalize('NFKC').toLowerCase().replace(/[\s�
 function dupItems() {
   return slotsAll().filter(sl => !sl.role).map(sl => ({ sl, cd: sourceFor(sl) })).filter(x => x.cd);
 }
-const twinOf = (n) => n.startsWith('i_') ? 'a_' + n.slice(2) : n.startsWith('a_') ? 'i_' + n.slice(2) : null;
+const MENU_NO = new Set(['03', '04', '07', '08', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38']);
+const twinOf = (n) => { const m = n.match(/^i_(\d\d)(_g)?\.png$/); if (m && MENU_NO.has(m[1])) return m[2] ? `i_${m[1]}.png` : `i_${m[1]}_g.png`; return n.startsWith('i_') ? 'a_' + n.slice(2) : n.startsWith('a_') ? 'i_' + n.slice(2) : null; };
 function dupState() {
   const items = dupItems(), issues = [];
   // 1) the same picture placed in two slots (iOS/Android twins in a theme are fine)
