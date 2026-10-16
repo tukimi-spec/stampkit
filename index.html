@@ -353,6 +353,17 @@ html{background:var(--bg)!important;background-image:none!important}
 .ask{background:#fff;border:1.5px solid var(--brown)}
 .toast{background:#3a2d26;color:#fbf6f0;border-radius:999px}
 .drop{border-radius:18px;border-color:var(--brown-soft);background:var(--sunk)}
+/* small dot grips: they no longer cover the illustration (the whole line / a wider invisible area stays grabbable) */
+.gl.v i,.gl.h i{width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;background:var(--brown);border:2px solid #fff;box-shadow:0 0 0 1px rgba(60,40,25,.25)}
+.gl.v i{left:50%}.gl.h i{top:50%}
+.gl.all{width:24px;height:24px;margin:4px 0 0 4px;font-size:13px;background:rgba(255,255,255,.88);border-width:1.5px}
+.box .h[data-h]{width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:var(--brown);border:2px solid #fff;box-shadow:0 0 0 1px rgba(60,40,25,.25)}
+.box .h[data-h]::before{content:"";position:absolute;inset:-12px}
+@media (pointer:coarse){
+  .gl.v i,.gl.h i{width:12px;height:12px;margin:-6px 0 0 -6px}
+  .gl.all{width:28px;height:28px;font-size:15px}
+  .box .h[data-h]{width:14px;height:14px;margin:-7px 0 0 -7px}.box .h[data-h]::before{inset:-14px}
+}
 </style>
 
 <div class="wrap">
