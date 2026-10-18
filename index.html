@@ -89,7 +89,7 @@ button,select,input{font:inherit;color:inherit}
 .field output{font-family:var(--f-mono);color:var(--ink)}
 .check{display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer}
 .check input{accent-color:var(--accent);width:18px;height:18px}
-.kinds{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.kinds{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:12px}
 .kind-card{border:2px solid var(--line);border-radius:14px;padding:16px;background:var(--sunk);cursor:pointer;text-align:left;display:grid;gap:6px}
 .kind-card h3{font-size:20px}
 .kind-card p{margin:0;color:var(--muted);font-size:13px}
@@ -397,6 +397,18 @@ const SPEC = {
     ],
     note: 'スタンプ：メイン 240×240 / スタンプ 最大370×320（8・16・24・32・40個）/ タブ 96×74。PNG・RGB・72dpi以上・背景透過・縦横とも偶数px・1枚1MB以下・ZIP 60MB以下・内容の周りに10px程度の余白。'
   },
+  big: {
+    // LINE Creators Market「BIGスタンプ」ガイドライン（2026年10月確認）: 8/16/24/32/40個、最大396×660・最小80×524、余白不要（自動で追加され最大420×680）
+    label: 'BIGスタンプ', unit: '個', counts: [8, 16, 24, 32, 40], zipLimitMB: 60, zipName: 'bigsticker', transparent: true,
+    blurb: '大きく表示される縦長のスタンプ。年末年始のあいさつにも', spec: '最大396×660px・8〜40個',
+    groups: (n) => [
+      { title: 'メイン画像・タブ画像', note: '選んだ絵から自動で作成', slots: [
+        { name: 'main.png', w: 240, h: 240, role: 'main', label: 'メイン', margin: 10 },
+        { name: 'tab.png', w: 96, h: 74, role: 'tab', label: 'タブ', margin: 2 } ] },
+      { title: 'BIGスタンプ画像', note: `最大396×660px（最小80×524）・${n}個・余白は不要（LINE側で自動追加）`, slots: Array.from({ length: n }, (_, i) => ({ name: String(i + 1).padStart(2, '0') + '.png', w: 396, h: 660, fit: 'big', margin: 0, idx: i })) },
+    ],
+    note: 'BIGスタンプ：メイン 240×240 / スタンプ 最大396×660・最小80×524（8・16・24・32・40個）/ タブ 96×74。PNG・RGB・72dpi以上・背景透過・縦横とも偶数px・1枚1MB以下・ZIP 60MB以下。余白は不要です（LINE側で自動で追加され、最大420×680で表示）。横長の絵は見づらくなるため、縦長の絵がおすすめです。'
+  },
   emoji: {
     label: '絵文字', unit: '個', counts: [8, 16, 24, 32, 40], zipLimitMB: 20, zipName: 'emoji', transparent: true,
     blurb: '文章の中に入れて使う絵文字', spec: '180×180px・8〜40個',
@@ -443,8 +455,8 @@ const MB = 1024 * 1024;
 const fname = (sl) => (S.mode === 'theme' && S.fileNames[sl.name]) || sl.name;
 
 const S = {
-  step: 0, mode: 'sticker', count: { sticker: 16, emoji: 16 }, themeOpt: true,
-  margin: { sticker: 10, emoji: 2, theme: 6 }, stickerFit: 'fixed', themeBg: '#ffffff', mirror: true,
+  step: 0, mode: 'sticker', count: { sticker: 16, big: 8, emoji: 16 }, themeOpt: true, bigFit: 'tight',
+  margin: { sticker: 10, big: 0, emoji: 2, theme: 6 }, stickerFit: 'fixed', themeBg: '#ffffff', mirror: true,
   sheets: [], active: null, selBox: null,
   cands: [], picked: [], mainId: null, tabId: null, themeAssign: {},
   tol: null, reviewBg: 'chk', maxStep: 0, zoom: 1, fileNames: {}, words: {}, dupOk: {},
@@ -777,7 +789,7 @@ function usedCands() { const ids = new Set(); slotsAll().forEach(sl => { const c
 const cache = new Map(), kbCache = new Map();
 function convert(cd, sl) {
   const m = sl.margin ?? S.margin[S.mode];
-  const key = [vk(cd), cd.proc ? 'p' : 'r', sl.name, sl.w, sl.h, m, S.stickerFit, S.themeBg].join('|');
+  const key = [vk(cd), cd.proc ? 'p' : 'r', sl.name, sl.w, sl.h, m, S.stickerFit, S.bigFit, S.themeBg].join('|');
   if (cache.has(key)) return cache.get(key);
   let src = imgOf(cd); if (isClear(cd)) src = trim(src);
   let W = sl.w, H = sl.h, out, scale;
@@ -787,6 +799,8 @@ function convert(cd, sl) {
   } else {
     scale = Math.min((W - 2 * m) / src.width, (H - 2 * m) / src.height); const dw = Math.round(src.width * scale), dh = Math.round(src.height * scale);
     if (sl.fit === 'sticker' && S.stickerFit === 'tight') { W = Math.min(370, even(dw + 2 * m)); H = Math.min(320, even(dh + 2 * m)); }
+    // BIG: as large as possible inside 396×660, no margin; keep at least 80 wide × 524 tall (transparent space is added if needed)
+    if (sl.fit === 'big' && S.bigFit !== 'fixed') { W = Math.max(80, Math.min(396, even(dw))); H = Math.max(524, Math.min(660, even(dh))); }
     out = mk(W, H); const x = ctx2(out); if (sl.opaque) { x.fillStyle = S.themeBg; x.fillRect(0, 0, W, H); }
     drawScaled(x, src, Math.round((W - dw) / 2), Math.round((H - dh) / 2), dw, dh);
   }
@@ -794,10 +808,11 @@ function convert(cd, sl) {
 }
 function checks(r, sl) {
   const c = r.canvas, w = c.width, h = c.height, L = [];
-  const ok = sl.fit === 'sticker' ? (w <= 370 && h <= 320) : (w === sl.w && h === sl.h);
+  const ok = sl.fit === 'sticker' ? (w <= 370 && h <= 320) : sl.fit === 'big' ? (w >= 80 && w <= 396 && h >= 524 && h <= 660) : (w === sl.w && h === sl.h);
   L.push({ lv: ok ? 'ok' : 'bad', t: `${w}×${h}px` + (ok ? '' : ' サイズ不一致') });
   if (S.mode !== 'theme' && (w % 2 || h % 2)) L.push({ lv: 'bad', t: '縦横が偶数ではありません' });
   if (SPEC[S.mode].transparent || (S.mode === 'theme' && !sl.opaque && sl.fit !== 'cover')) L.push(isClear(r.cd) ? { lv: 'ok', t: '背景透過' } : { lv: SPEC[S.mode].transparent ? 'bad' : 'warn', t: '背景が透過されていません' });
+  if (sl.fit === 'big') { const sw = imgOf(r.cd).width, shh = imgOf(r.cd).height; if (sw / shh > 1.15) L.push({ lv: 'warn', t: '横長の絵はBIGスタンプでは小さく見えます（縦長がおすすめ）' }); }
   if (r.scale > 1.15) L.push({ lv: 'warn', t: `元画像が小さく ${Math.round(r.scale * 100)}% に拡大` });
   const kb = kbCache.get(c); if (kb !== undefined) L.push(kb <= 1024 ? { lv: 'ok', t: `${Math.round(kb)}KB` } : sl.maxSize ? { lv: 'ok', t: `${Math.round(kb)}KB → 書き出し時に1MB以下へ自動縮小` } : { lv: 'bad', t: `${Math.round(kb)}KB（1MB超過）` });
   return L;
@@ -854,7 +869,7 @@ function render() {
 /* ---------- STEP 1 ---------- */
 function vChoose(v) {
   const p = el(`<section class="panel"><div class="ph"><div><span class="eyebrow">Step 1</span><h2>何を作りますか？</h2><p class="lead">作るものと、セットの個数を選んでください。あとから戻って変えることもできます。</p></div></div>
-    <div class="kinds">${['sticker', 'emoji', 'theme'].map(k => `<button type="button" class="kind-card" data-k="${k}" aria-pressed="${S.mode === k}"><h3>${SPEC[k].label}</h3><p>${SPEC[k].blurb}</p><span class="spec">${SPEC[k].spec}</span></button>`).join('')}</div>
+    <div class="kinds">${['sticker', 'big', 'emoji', 'theme'].map(k => `<button type="button" class="kind-card" data-k="${k}" aria-pressed="${S.mode === k}"><h3>${SPEC[k].label}</h3><p>${SPEC[k].blurb}</p><span class="spec">${SPEC[k].spec}</span></button>`).join('')}</div>
     <div class="counts" id="counts"></div></section>`);
   v.appendChild(p);
   p.querySelectorAll('[data-k]').forEach(b => b.onclick = () => { switchMode(b.dataset.k); render(); });
@@ -1070,8 +1085,8 @@ function vPick(v) {
   p.querySelector('#fill').onclick = () => { const rest = S.cands.map(c => c.id).filter(id => !S.picked.includes(id)); while (S.picked.length < need && rest.length) S.picked.push(rest.shift()); render(); };
   p.querySelector('#none').onclick = () => { S.picked = []; render(); };
   const ex = p.querySelector('#extra'); if (!S.picked.length) return;
-  const roles = S.mode === 'sticker' ? [['mainId', 'メイン画像', mainCand()], ['tabId', 'タブ画像', tabCand()]] : [['tabId', 'タブ画像', tabCand()]];
-  ex.innerHTML = `<h3 style="font-size:15px;margin-bottom:4px">${S.mode === 'sticker' ? 'メイン画像・タブ画像' : 'タブ画像'}</h3><p class="hint" style="margin-bottom:10px">選んだ絵から自動で作ります（最初は1番の絵）。タップで変更できます。</p><div class="row" id="roles"></div>`;
+  const roles = (S.mode === 'sticker' || S.mode === 'big') ? [['mainId', 'メイン画像', mainCand()], ['tabId', 'タブ画像', tabCand()]] : [['tabId', 'タブ画像', tabCand()]];
+  ex.innerHTML = `<h3 style="font-size:15px;margin-bottom:4px">${(S.mode === 'sticker' || S.mode === 'big') ? 'メイン画像・タブ画像' : 'タブ画像'}</h3><p class="hint" style="margin-bottom:10px">選んだ絵から自動で作ります（最初は1番の絵）。タップで変更できます。</p><div class="row" id="roles"></div>`;
   roles.forEach(([key, label, cd]) => { const b = el(`<button type="button" class="cand" style="width:130px"><div class="im chk"><img alt="" src="${cd.url}"></div><div class="cap"><span>${label}</span><span class="pill ok">変更</span></div></button>`);
     b.onclick = () => openPicker(`${label}に使う絵`, S.picked.map(cand).filter(Boolean), id => { S[key] = id; render(); }); ex.querySelector('#roles').appendChild(b); });
 }
@@ -1366,11 +1381,13 @@ function vReview(v) {
   v.appendChild(p);
   p.querySelectorAll('[data-bg]').forEach(b => b.onclick = () => { S.reviewBg = b.dataset.bg; render(); });
   const set = p.querySelector('#set');
-  set.innerHTML = `<label class="field">余白 <output>${S.margin[S.mode]}px</output><input type="range" id="mg" min="0" max="30" value="${S.margin[S.mode]}"></label>` +
+  set.innerHTML = (S.mode === 'big' ? '<p class="hint" style="align-self:center">BIGスタンプは余白なしで書き出します（LINE側で自動で余白が付きます）</p>' : `<label class="field">余白 <output>${S.margin[S.mode]}px</output><input type="range" id="mg" min="0" max="30" value="${S.margin[S.mode]}"></label>`) +
     (S.mode === 'sticker' ? `<label class="field">スタンプのサイズ<select id="fit"><option value="fixed" ${S.stickerFit === 'fixed' ? 'selected' : ''}>370×320 に統一</option><option value="tight" ${S.stickerFit === 'tight' ? 'selected' : ''}>絵に合わせて縮める</option></select></label>` : '') +
+    (S.mode === 'big' ? `<label class="field">BIGスタンプのサイズ<select id="bfit"><option value="tight" ${S.bigFit !== 'fixed' ? 'selected' : ''}>絵に合わせる（おすすめ・縦は最小524px）</option><option value="fixed" ${S.bigFit === 'fixed' ? 'selected' : ''}>396×660 に統一</option></select></label>` : '') +
     (S.mode === 'theme' ? `<label class="field">サムネイルの背景色<input type="color" id="tbg" value="${S.themeBg}" style="width:100%;height:38px;border:1px solid var(--line);border-radius:8px;background:var(--sunk)"></label>` : '');
-  const mg = set.querySelector('#mg'); mg.oninput = e => e.target.previousElementSibling.textContent = e.target.value + 'px'; mg.onchange = e => { S.margin[S.mode] = +e.target.value; render(); };
+  const mg = set.querySelector('#mg'); if (mg) mg.oninput = e => e.target.previousElementSibling.textContent = e.target.value + 'px'; if (mg) mg.onchange = e => { S.margin[S.mode] = +e.target.value; render(); };
   set.querySelector('#fit') && (set.querySelector('#fit').onchange = e => { S.stickerFit = e.target.value; render(); });
+  set.querySelector('#bfit') && (set.querySelector('#bfit').onchange = e => { S.bigFit = e.target.value; render(); });
   set.querySelector('#tbg') && (set.querySelector('#tbg').onchange = e => { S.themeBg = e.target.value; render(); });
   const rv = p.querySelector('#rv'); let bad = 0, warn = 0, miss = 0;
   slotsAll().forEach(sl => {
@@ -1441,7 +1458,7 @@ async function doExport(force) {
     const out = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
     if (sp.zipLimitMB && out.size > sp.zipLimitMB * MB) toast(`ZIPが${sp.zipLimitMB}MBを超えています（${(out.size / MB).toFixed(1)}MB）`); else if (over.length) toast(`1MBを超える画像があります：${over.join(', ')}`);
     S.done = true; scheduleSave();
-    showSavePanel(`${sp.zipName}_${S.mode === 'theme' ? 'set' : S.count[S.mode]}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.zip`, out, zip.file(/.*/).length);
+    showSavePanel(`${sp.zipName}_${S.mode === 'theme' ? 'set' : S.count[S.mode]}_${(d => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`)(new Date())}.zip`, out, zip.file(/.*/).length);
   } catch (e) { toast('書き出しに失敗しました：' + (e.message || e.code || e)); }
   finally { renderBar(); }
 }
@@ -1485,7 +1502,7 @@ async function saveNow() {
       if (!cd.proc) cd.procBlob = null;
     }
     if (S.cands.some(c => !c.rawBlob || (c.proc && !c.procBlob))) { scheduleSave(); return; }
-    await STORE.set('work', { v: 1, at: Date.now(), uid, mode: S.mode, count: S.count, themeOpt: S.themeOpt, margin: S.margin, stickerFit: S.stickerFit, themeBg: S.themeBg, mirror: S.mirror,
+    await STORE.set('work', { v: 1, at: Date.now(), uid, mode: S.mode, count: S.count, themeOpt: S.themeOpt, margin: S.margin, stickerFit: S.stickerFit, bigFit: S.bigFit, themeBg: S.themeBg, mirror: S.mirror,
       picked: S.picked, mainId: S.mainId, tabId: S.tabId, themeAssign: S.themeAssign, fileNames: S.fileNames, words: S.words, dupOk: S.dupOk, step: S.step, done: S.done,
       cands: S.cands.map(c => ({ id: c.id, raw: c.rawBlob, proc: c.procBlob, transparent: c.transparent, sheetId: c.sheetId, manual: !!c.manual })) });
     lastSaved = Date.now(); const m = $('saved'); if (m) m.textContent = '自動保存しました';
@@ -1499,7 +1516,7 @@ async function restore(data) {
     for (const c of data.cands) { const raw = await blobToCanvas(c.raw); const proc = c.proc ? await blobToCanvas(c.proc) : null;
       cands.push({ id: c.id, raw, proc, transparent: c.transparent, sheetId: c.sheetId, manual: !!c.manual, ver: 0, rawBlob: c.raw, procBlob: c.proc, url: thumbURL(proc || raw), rawUrl: proc ? thumbURL(raw) : undefined }); }
     clearWork(); S.byMode = {};
-    Object.assign(S, { mode: data.mode, count: data.count, themeOpt: data.themeOpt, margin: data.margin, stickerFit: data.stickerFit, themeBg: data.themeBg, mirror: data.mirror,
+    Object.assign(S, { mode: data.mode, count: { ...S.count, ...(data.count || {}) }, themeOpt: data.themeOpt, margin: { ...S.margin, ...(data.margin || {}) }, stickerFit: data.stickerFit, bigFit: data.bigFit || 'tight', themeBg: data.themeBg, mirror: data.mirror,
       picked: data.picked || [], mainId: data.mainId, tabId: data.tabId, themeAssign: data.themeAssign || {}, fileNames: data.fileNames || {}, words: data.words || {}, dupOk: data.dupOk || {}, cands });
     uid = Math.max(uid, data.uid || 0, ...cands.map(c => c.id)) + 1;
     const st = Math.max(2, Math.min(5, data.step || 2)); S.maxStep = st; toast(`${cands.length}枚の絵を読み込みました`); saveReady = true; go(st);
