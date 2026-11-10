@@ -718,6 +718,45 @@ function removeBg(src, tol, o = {}) {
   finishEdges(d, w, h, seen, D, (p) => pal[B[p]], tol, erode);
   x.putImageData(id, 0, 0); return c;
 }
+// ---- leftover check: flat areas of the original background colour still left inside the picture ----
+// (e.g. the white gap between an arm and the body). Only flat, exact background colour counts,
+// so shaded white fur is normally not flagged. Result is cached per cut-out version.
+const leftCache = new Map();
+function leftoverOf(cd) {
+  if (!cd || !cd.proc || cd.transparent) return null;
+  const k = vk(cd) + '|' + (S.tol ?? 'auto'); if (leftCache.has(k)) return leftCache.get(k);
+  const w = cd.raw.width, h = cd.raw.height, N = w * h;
+  const rd = ctx2(cd.raw).getImageData(0, 0, w, h).data, pd = ctx2(cd.proc).getImageData(0, 0, w, h).data;
+  const pal = bgPalette(rd, w, h), tol = S.tol ?? autoTol(rd, w, h, pal);
+  const strict = Math.max(5, Math.round(tol * 0.4)), meanMax = Math.max(3, tol * 0.18), minA = Math.max(24, N * 0.0012);
+  const D = new Uint8Array(N), m = new Uint8Array(N);
+  for (let p = 0, i = 0; p < N; p++, i += 4) {
+    if (pd[i + 3] < 200) continue;
+    let b = 255; for (const q of pal) b = Math.min(b, Math.max(Math.abs(rd[i] - q[0]), Math.abs(rd[i + 1] - q[1]), Math.abs(rd[i + 2] - q[2])));
+    if (b <= strict) { m[p] = 1; D[p] = b; }
+  }
+  const mark = new Uint8Array(N), lab = new Uint8Array(N), st = new Int32Array(N); let spots = 0, area = 0;
+  for (let p0 = 0; p0 < N; p0++) { if (!m[p0] || lab[p0]) continue;
+    const comp = []; let sum = 0, sp = 1; st[0] = p0; lab[p0] = 1;
+    while (sp) { const p = st[--sp]; comp.push(p); sum += D[p]; const px = p % w;
+      for (const q of [px > 0 ? p - 1 : -1, px < w - 1 ? p + 1 : -1, p >= w ? p - w : -1, p < N - w ? p + w : -1]) if (q >= 0 && m[q] && !lab[q]) { lab[q] = 1; st[sp++] = q; } }
+    if (comp.length >= minA && sum / comp.length <= meanMax) { spots++; area += comp.length; for (const p of comp) mark[p] = 1; }
+  }
+  const r = spots ? { spots, area, mark, w, h } : null; leftCache.set(k, r); return r;
+}
+// the transparent picture with the suspicious areas painted magenta (for the preview)
+function leftoverURL(cd, lo) {
+  const s = 240, kk = Math.min(1, s / Math.max(lo.w, lo.h)), c = mk(lo.w, lo.h), x = ctx2(c); x.drawImage(cd.proc, 0, 0);
+  const id = x.getImageData(0, 0, lo.w, lo.h), d = id.data;
+  for (let p = 0; p < lo.mark.length; p++) if (lo.mark[p]) { const i = p * 4; d[i] = 255; d[i + 1] = 0; d[i + 2] = 230; d[i + 3] = 255; }
+  x.putImageData(id, 0, 0); const t = mk(lo.w * kk, lo.h * kk); drawScaled(ctx2(t), c, 0, 0, t.width, t.height); return t.toDataURL();
+}
+// almost-invisible pixels (alpha below ~6%) are invisible on white but count as "not transparent" in review
+function clearFaint(c) {
+  const x = ctx2(c), id = x.getImageData(0, 0, c.width, c.height), d = id.data; let n = 0;
+  for (let i = 3; i < d.length; i += 4) if (d[i] && d[i] < 16) { d[i] = 0; n++; }
+  if (n) x.putImageData(id, 0, 0); return c;
+}
 function detect(c, gapPx) {
   const mc = isTransparent(c) ? c : removeBg(c, 40, { fast: true, holes: false }); const m = alphaMask(mc), w = c.width, h = c.height;
   const cell = Math.max(2, Math.ceil(Math.max(w, h) / 420)), gw = Math.ceil(w / cell), gh = Math.ceil(h / cell), g = new Uint8Array(gw * gh);
@@ -804,6 +843,7 @@ function convert(cd, sl) {
     out = mk(W, H); const x = ctx2(out); if (sl.opaque) { x.fillStyle = S.themeBg; x.fillRect(0, 0, W, H); }
     drawScaled(x, src, Math.round((W - dw) / 2), Math.round((H - dh) / 2), dw, dh);
   }
+  if (!sl.opaque) clearFaint(out);
   const r = { canvas: out, scale, cd }; cache.set(key, r); return r;
 }
 function checks(r, sl) {
@@ -811,7 +851,12 @@ function checks(r, sl) {
   const ok = sl.fit === 'sticker' ? (w <= 370 && h <= 320) : sl.fit === 'big' ? (w >= 80 && w <= 396 && h >= 524 && h <= 660) : (w === sl.w && h === sl.h);
   L.push({ lv: ok ? 'ok' : 'bad', t: `${w}×${h}px` + (ok ? '' : ' サイズ不一致') });
   if (S.mode !== 'theme' && (w % 2 || h % 2)) L.push({ lv: 'bad', t: '縦横が偶数ではありません' });
-  if (SPEC[S.mode].transparent || (S.mode === 'theme' && !sl.opaque && sl.fit !== 'cover')) L.push(isClear(r.cd) ? { lv: 'ok', t: '背景透過' } : { lv: SPEC[S.mode].transparent ? 'bad' : 'warn', t: '背景が透過されていません' });
+  if (SPEC[S.mode].transparent || (S.mode === 'theme' && !sl.opaque && sl.fit !== 'cover')) {
+    L.push(isClear(r.cd) ? { lv: 'ok', t: '背景透過' } : { lv: 'bad', t: '背景が透過されていません' });
+    const lo = leftoverOf(r.cd); if (lo) L.push({ lv: 'warn', t: `囲まれた背景が残っている可能性（${lo.spots}か所）→ Step 4 で確認` });
+  }
+  if (S.mode === 'theme') { const t = twinOf(sl.name), a = S.themeAssign[sl.name], b = t && S.themeAssign[t];
+    if (cand(a) && cand(b) && a !== b) L.push({ lv: 'bad', t: `${fname({ name: t })} と絵が違います（同じ絵にしてください）` }); }
   if (sl.fit === 'big') { const sw = imgOf(r.cd).width, shh = imgOf(r.cd).height; if (sw / shh > 1.15) L.push({ lv: 'warn', t: '横長の絵はBIGスタンプでは小さく見えます（縦長がおすすめ）' }); }
   if (r.scale > 1.15) L.push({ lv: 'warn', t: `元画像が小さく ${Math.round(r.scale * 100)}% に拡大` });
   const kb = kbCache.get(c); if (kb !== undefined) L.push(kb <= 1024 ? { lv: 'ok', t: `${Math.round(kb)}KB` } : sl.maxSize ? { lv: 'ok', t: `${Math.round(kb)}KB → 書き出し時に1MB以下へ自動縮小` } : { lv: 'bad', t: `${Math.round(kb)}KB（1MB超過）` });
@@ -847,7 +892,7 @@ function renderBar() {
   if (S.step === 1) { nx.disabled = !S.cands.length; msg.textContent = S.cands.length ? `${S.cands.length}枚を切り出しました` : '枠を決めて「切り出す」を押してください'; }
   else if (S.step === 2) { const m = needCount() - haveCount(); nx.disabled = haveCount() === 0; msg.textContent = m > 0 ? `あと${m}${SPEC[S.mode].unit}選べます（足りないままでも先に進めます）` : '必要な数がそろいました'; }
   else if (S.step === 3) { const n = usedCands().filter(c => !isClear(c)).length; msg.textContent = n ? `透過されていない絵が${n}枚あります` : 'すべて透過済みです'; }
-  else if (S.step === 4) { const d = dupState(); msg.textContent = d.open ? `確認が必要な重複が${d.open}件あります` : '重複は見つかりませんでした'; }
+  else if (S.step === 4) { const d = dupState(), tw = twinIssues().length; msg.textContent = tw ? `OSによって絵が違うペアが${tw}組あります` : d.open ? `確認が必要な重複が${d.open}件あります` : '重複は見つかりませんでした'; }
   else if (S.step === 5) msg.textContent = 'ZIPを申請画面でアップロードします';
   else msg.textContent = '';
 }
@@ -1091,9 +1136,8 @@ function vPick(v) {
     b.onclick = () => openPicker(`${label}に使う絵`, S.picked.map(cand).filter(Boolean), id => { S[key] = id; render(); }); ex.querySelector('#roles').appendChild(b); });
 }
 function vPickTheme(v) {
-  const p = el(`<section class="panel"><div class="ph"><div><span class="eyebrow">Step 3</span><h2>着せかえの各画像に絵を割り当てる</h2><p class="lead">枠をタップして、使う絵を選んでください。赤い点線の枠がまだ足りない画像です。</p></div>
-    <label class="check"><input type="checkbox" id="mir" ${S.mirror ? 'checked' : ''}> iOSとAndroid、iOS 26用にも同じ絵を使う</label></div><div id="gs"></div></section>`);
-  v.appendChild(p); p.querySelector('#mir').onchange = e => S.mirror = e.target.checked;
+  const p = el(`<section class="panel"><div class="ph"><div><span class="eyebrow">Step 3</span><h2>着せかえの各画像に絵を割り当てる</h2><p class="lead">枠をタップして、使う絵を選んでください。赤い点線の枠がまだ足りない画像です。<br>iOSとAndroid（i_XX と a_XX）、iOS 26用（i_XX と i_XX_g）はLINEの審査で同じ絵にする決まりがあるため、片方を選ぶともう片方も同じ絵になります。</p></div></div><div id="tw"></div><div id="gs"></div></section>`);
+  v.appendChild(p); twinBox(p.querySelector('#tw'));
   const gs = p.querySelector('#gs');
   SPEC.theme.groups(S.themeOpt).forEach(g => {
     const sec = el(`<div class="group"><h3>${g.title} <small>${g.note}</small></h3><div class="slots"></div></div>`);
@@ -1101,7 +1145,7 @@ function vPickTheme(v) {
       const cd = cand(S.themeAssign[sl.name]);
       const b = el(`<button type="button" class="slot ${cd ? '' : 'missing'} ${sl.optional ? 'optional' : ''}"><div class="im ${cd ? 'chk' : ''}">${cd ? `<img alt="" src="${cd.url}">` : (sl.optional ? '任意' : '＋')}</div><b>${esc(fname(sl).replace('.png', ''))}</b><i>${sl.label || ''}</i></button>`);
       b.onclick = () => { if (!S.cands.length) { toast('先に Step 2 で絵を切り出してください'); return; }
-        openPicker(`${fname(sl)}（${sl.w}×${sl.h}）に使う絵`, S.cands, id => { assignTheme(sl.name, id); render(); }, cd ? () => { delete S.themeAssign[sl.name]; render(); } : null); };
+        openPicker(`${fname(sl)}（${sl.w}×${sl.h}）に使う絵`, S.cands, id => { assignTheme(sl.name, id); render(); }, cd ? () => { delete S.themeAssign[sl.name]; const t = twinOf(sl.name); if (t) delete S.themeAssign[t]; render(); } : null); };
       sec.querySelector('.slots').appendChild(b);
     });
     gs.appendChild(sec);
@@ -1114,9 +1158,28 @@ function vPickTheme(v) {
   fn.querySelector('#fnr').onclick = () => { S.fileNames = {}; render(); };
   p.appendChild(fn);
 }
+// iOS / Android / iOS 26 versions of the same icon must use the same picture (review guideline 1.1 / 1.8): always assign both
 function assignTheme(name, id) {
   S.themeAssign[name] = id;
-  if (S.mirror) { const twin = twinOf(name); if (twin && themeSlots().some(s => s.name === twin) && !S.themeAssign[twin]) S.themeAssign[twin] = id; }
+  const twin = twinOf(name); if (twin && themeSlots().some(s => s.name === twin)) S.themeAssign[twin] = id;
+}
+// pairs that hold different pictures (e.g. work saved before pairs were linked)
+function twinIssues() {
+  if (S.mode !== 'theme') return [];
+  const slots = themeSlots(), out = [], done = new Set();
+  slots.forEach(a => { const t = twinOf(a.name), b = t && slots.find(s => s.name === t); if (!b || done.has(a.name)) return; done.add(b.name);
+    const ia = S.themeAssign[a.name], ib = S.themeAssign[b.name]; if (cand(ia) && cand(ib) && ia !== ib) out.push({ a, b, ia, ib }); });
+  return out;
+}
+function twinBox(host) {
+  const list = twinIssues(); host.innerHTML = ''; if (!list.length) return;
+  const box = el(`<div class="issues" style="margin-bottom:14px"><div class="confirm" role="alert" style="margin:0"><span><b>OSによって絵が違うペアが ${list.length}組あります。</b>LINEの審査では「同じボタン間でデザインが著しく異なる」「OSにより同アイコンのイラストが著しく異なる」としてリジェクトされます。どちらの絵にそろえるか選んでください。</span></div></div>`);
+  list.forEach(x => { const lb = (sl) => `${esc(fname(sl))}${sl.label ? `<small class="hint">（${esc(sl.label)}）</small>` : ''}`;
+    const row = el(`<div class="issue"><div class="pairs"><div class="chk"><img alt="" src="${cand(x.ia).url}"></div><div class="chk"><img alt="" src="${cand(x.ib).url}"></div></div><div class="txt">${lb(x.a)} と ${lb(x.b)} の絵が違います。</div><div class="row"><button class="btn sm" type="button" data-l>左の絵にそろえる</button><button class="btn sm" type="button" data-r>右の絵にそろえる</button></div></div>`);
+    row.querySelector('[data-l]').onclick = () => { S.themeAssign[x.b.name] = x.ia; render(); };
+    row.querySelector('[data-r]').onclick = () => { S.themeAssign[x.a.name] = x.ib; render(); };
+    box.appendChild(row); });
+  host.appendChild(box);
 }
 function openPicker(title, list, onPick, onClear) {
   const pop = $('pop');
@@ -1138,6 +1201,8 @@ function setProc(cd, canvas, manual) {
   cd.url = canvas ? thumbURL(canvas) : (cd.rawUrl || thumbURL(cd.raw));
   for (const k of Object.keys(S.dupOk)) if (k.startsWith('look|') && k.split('|').slice(1, 3).includes(String(cd.id))) delete S.dupOk[k];
 }
+// themes are checked on dark: white leftovers are invisible on the checker / white background
+const tBgNow = () => S.tBg || (S.mode === 'theme' ? 'dark' : 'chk');
 function vClear(v) {
   const used = usedCands(), todo = used.filter(c => !c.transparent), pre = used.filter(c => c.transparent);
   const opaqueOnly = (cd) => S.mode === 'theme' && slotsAll().filter(s => S.themeAssign[s.name] === cd.id).every(s => s.opaque || s.fit === 'cover');
@@ -1157,14 +1222,16 @@ function vClear(v) {
       <details class="ask" style="margin-top:12px" ${autoDone.length ? '' : 'hidden'}><summary style="cursor:pointer;font-weight:700">消し残しが多いときは：設定を変えて透過し直す</summary>${opts}<div class="row"><button class="btn" id="redo" type="button">この設定で ${autoDone.length}枚を透過し直す</button></div><p class="hint">「手で直す」で修正した絵は、上書きしないようにそのまま残します。</p></details>`)
       : `<div class="okbox">✓ 選んだ ${used.length}枚はすべて元から背景が透過されています。消し残しがあれば「手で直す」で消せます。</div>`) +
     `<div class="row" style="margin-block:14px 10px;justify-content:space-between"><p class="hint" style="margin:0">元から透過済み ${pre.length}枚・処理対象 ${todo.length}枚。左が元画像、右が透過後です。</p>
-      <div class="seg" role="group" aria-label="確認用の背景色">${[['chk', 'チェック'], ['dark', '黒'], ['green', '緑'], ['pink', 'ピンク']].map(([k, l]) => `<button type="button" data-bg="${k}" aria-pressed="${(S.tBg || 'chk') === k}">${l}</button>`).join('')}</div></div>
-    <div class="tgrid bg-${S.tBg || 'chk'}" id="tg"></div>`;
+      <div class="seg" role="group" aria-label="確認用の背景色">${[['chk', 'チェック'], ['dark', '黒'], ['green', '緑'], ['pink', 'ピンク']].map(([k, l]) => `<button type="button" data-bg="${k}" aria-pressed="${(tBgNow()) === k}">${l}</button>`).join('')}</div></div>
+    <div id="lo"></div><div class="tgrid bg-${tBgNow()}" id="tg"></div>`;
+  const los = [...todo, ...pre].filter(cd => leftoverOf(cd));
+  if (los.length) body.querySelector('#lo').innerHTML = `<div class="confirm" role="status" style="margin-bottom:12px"><span><b>囲まれた背景が残っている可能性がある絵が ${los.length}枚あります。</b>腕と体のすき間など、元の背景と同じ色のまま残っている部分を<b style="color:#ff00e6">赤紫</b>で示しています。本当に背景なら「手で直す」の「タップで同じ色を消す」で消してください（LINEの審査で「背景の一部が透過漏れ」と指摘される原因になります）。絵の一部（白い毛など）なら、そのままで大丈夫です。</span></div>`;
   const tg = body.querySelector('#tg');
   body.querySelectorAll('[data-bg]').forEach(b => b.onclick = () => { S.tBg = b.dataset.bg; render(); });
   [...todo, ...pre].forEach(cd => {
-    const isPre = cd.transparent, prev = cd.proc ? cd.url : isPre ? cd.url : removeBgPreview(cd), raw = cd.rawUrl || cd.url;
+    const isPre = cd.transparent, lo = leftoverOf(cd), prev = lo ? leftoverURL(cd, lo) : cd.proc ? cd.url : isPre ? cd.url : removeBgPreview(cd), raw = cd.rawUrl || cd.url;
     const state = isPre ? (cd.proc ? '手で修正済み' : '元から透過') : cd.proc ? (cd.manual ? '手で修正済み' : '透過済み') : '透過後（予想）';
-    const it = el(`<div class="titem ${tSel.has(cd.id) || cd.proc ? 'on' : ''}">${!isPre && cd.proc ? '<button class="xbtn corner" type="button" data-undo aria-label="透過を取り消して元の絵に戻す" title="透過を取り消す">✕</button>' : ''}<div class="pair"><div class="chk"><img alt="元画像" src="${raw}"></div><div class="tv"><img alt="透過後" src="${prev}"></div></div><div class="lbl"><span>元</span><span>${state}</span></div>
+    const it = el(`<div class="titem ${tSel.has(cd.id) || cd.proc ? 'on' : ''}">${!isPre && cd.proc ? '<button class="xbtn corner" type="button" data-undo aria-label="透過を取り消して元の絵に戻す" title="透過を取り消す">✕</button>' : ''}<div class="pair"><div class="chk"><img alt="元画像" src="${raw}"></div><div class="tv"><img alt="透過後" src="${prev}"></div></div><div class="lbl"><span>元</span><span>${state}</span></div>${lo ? `<span class="pill warn">背景が残っている可能性 ${lo.spots}か所（赤紫）</span>` : ''}
       <div class="row" style="gap:6px">${isPre || cd.proc ? '' : `<label class="check"><input type="checkbox" ${tSel.has(cd.id) ? 'checked' : ''}> 透過する ${opaqueOnly(cd) ? '<span class="pill warn">サムネイル用</span>' : ''}</label>`}
       <button class="btn sm" type="button" data-fix>手で直す</button></div></div>`);
     const cb = it.querySelector('input'); if (cb) cb.onchange = e => { e.target.checked ? tSel.add(cd.id) : tSel.delete(cd.id); it.classList.toggle('on', e.target.checked); };
@@ -1217,7 +1284,7 @@ function openTouchUp(cd, mode = 'clear') {
   wx.drawImage(start, 0, 0);
   const base = mk(W, H); ctx2(base).drawImage(ER ? (cd.proc || raw) : raw, 0, 0); // what "なぞって戻す" paints back
   const undo = []; const snap = () => { undo.push(wx.getImageData(0, 0, W, H)); if (undo.length > 20) undo.shift(); };
-  let tool = 'erase', size = Math.max(6, Math.round(Math.max(W, H) / 30)), zoom = 1, bg = S.tBg || 'chk';
+  let tool = 'erase', size = Math.max(6, Math.round(Math.max(W, H) / 30)), zoom = 1, bg = tBgNow();
   const pop = el(`<div class="overlay" id="tu"><div class="sheetpop tu" role="dialog" aria-modal="true" aria-label="手で直す">
     <div class="ph"><h2 style="font-size:17px">${ER ? '消しゴム' : '手で直す'}</h2><button class="xbtn" id="tx" type="button" aria-label="保存せずに閉じる" title="保存せずに閉じる">✕</button></div>
     <div class="seg" role="group" aria-label="道具" id="tools">${[['erase', 'なぞって消す'], ['restore', 'なぞって戻す'], ['wand', 'タップで同じ色を消す'], ['pan', '動かす']].map(([k, l]) => `<button type="button" data-t="${k}">${l}</button>`).join('')}</div>
@@ -1332,8 +1399,8 @@ function dupState() {
 }
 function vDup(v) {
   const items = dupItems();
-  const p = el(`<section class="panel"><div class="ph"><div><span class="eyebrow">Step 5</span><h2>重複チェック</h2><p class="lead">ZIPにまとめる前に、同じイラストや同じ文言を選んでいないかを確認します。意図して同じ絵を使っている場合は「問題なし」を押してください。</p></div></div><div id="iss"></div><div id="wd"></div></section>`);
-  v.appendChild(p);
+  const p = el(`<section class="panel"><div class="ph"><div><span class="eyebrow">Step 5</span><h2>重複チェック</h2><p class="lead">ZIPにまとめる前に、同じイラストや同じ文言を選んでいないかを確認します。意図して同じ絵を使っている場合は「問題なし」を押してください。</p></div></div><div id="tw"></div><div id="iss"></div><div id="wd"></div></section>`);
+  v.appendChild(p); twinBox(p.querySelector('#tw'));
   if (!items.length) { p.querySelector('#iss').innerHTML = '<div class="empty">まだ絵が選ばれていません。Step 3 で選んでください。</div>'; return; }
   const drawIssues = () => {
     const st = dupState(), host = p.querySelector('#iss'); host.innerHTML = '';
@@ -1445,7 +1512,9 @@ async function pngUnder(c, sl) {
   return b;
 }
 async function doExport(force) {
-  const miss = slotsAll().filter(s => !s.optional && !sourceFor(s)).length, cf = $('cf'), dOpen = dupState().open;
+  const miss = slotsAll().filter(s => !s.optional && !sourceFor(s)).length, cf = $('cf'), dOpen = dupState().open, tw = twinIssues();
+  if (tw.length) { cf.innerHTML = `<div class="confirm" role="alert"><span>OSによって絵が違うペアが <b>${tw.length}組</b> あります（${tw.map(x => esc(fname(x.a)) + ' / ' + esc(fname(x.b))).join('、')}）。このままではLINEの審査でリジェクトされるため書き出せません。</span><button class="btn sm" id="tg2" type="button">そろえに行く</button></div>`;
+    cf.querySelector('#tg2').onclick = () => go(2); cf.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
   if (dOpen && !force) { cf.innerHTML = `<div class="confirm" role="alert"><span>確認していない重複が <b>${dOpen}件</b> あります。同じイラストや同じ文言のスタンプは審査で指摘されることがあります。</span><button class="btn sm" id="dg" type="button">重複チェックに戻る</button><button class="btn sm ghost" id="dy" type="button">このまま書き出す</button></div>`;
     cf.querySelector('#dg').onclick = () => go(4); cf.querySelector('#dy').onclick = () => { cf.innerHTML = ''; doExport('dup'); }; cf.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
   if (miss && force !== true) { cf.innerHTML = `<div class="confirm" role="alert"><span>まだ <b>${miss}枚</b> 足りません。そろっている分だけで書き出しますか？（申請にはすべて必要です）</span><button class="btn sm" id="y" type="button">このまま書き出す</button><button class="btn sm ghost" id="n" type="button">やめる</button></div>`;
